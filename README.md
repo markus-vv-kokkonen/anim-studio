@@ -1,1 +1,234 @@
 # anim-studio
+
+A keyframe pose editor for **procedurally-animated 2D characters** — for any
+game, any engine.
+
+Your game draws its characters in code; their motion comes from pose
+functions. Editing that motion usually means tweaking a magic number blind,
+re-baking, and squinting at a GIF. The studio replaces that with a tight loop:
+**drag → see → keyframe → save.** Pick any body from your roster, watch its
+real baked clips, pose it by dragging its joints (FK arms rotate, IK feet
+re-plant, the body root tilts), set keyframes with easing and per-clip
+duration, and Save — the edit lands in your game's own source as diffable,
+version-controlled data that both you and an agent can iterate on.
+
+Extracted and generalized from the Animation Studio of *Candlemere: The
+Kingdom Is Grateful*, where it poses a cast of ~190 procedurally-drawn bodies
+(the hero across every weapon × facing × wear tier, ~104 foes, and every
+boss). The hard-won rules are baked in as defaults.
+
+---
+
+## The rules this tool encodes
+
+1. **Authored data layers over procedural motion — and is inert until
+   authored.** A body with no timeline renders its procedural default
+   byte-for-byte. An authored key changes exactly the frames it keys and
+   nothing else. You can prove this in your own game with a drift harness
+   (bake everything → per-frame checksums → diff).
+2. **Absolute channels replay byte-identically; relative channels compose.**
+   A captured absolute value (`ang`, `fx/fy`, `dx/dy/rot`, …) *replaces* the
+   procedural computation — so a converted baseline replays exactly, and
+   editing a value edits the animation directly. A drag writes a *relative*
+   delta (`dAng`, `ikDx/ikDy`) that composes over either.
+3. **The studio must be faithful by construction.** It doesn't approximate
+   your animation — your adapter hands it the same frame plan and the same
+   draw code the game bakes from, so the frames shown are the frames the game
+   renders.
+4. **A skeleton is discovered from the draw, never hand-authored.** Rig
+   helpers self-assign stable bone ids from call order (`arm0`, `leg1`,
+   `root`) and record their pivots while drawing — the same order runs in the
+   studio and the game, so ids always agree.
+5. **Authored tempo must never move a hazard beat.** An authored `duration`
+   re-times *presentation* clips (idle/walk/hit) only; attack tempo stays
+   combat data your game applies at play time. (The studio previews
+   presentation clips at the authored tempo; mark them `retimable`.)
+6. **Saves are diff-stable.** Deep-sorted keys, full-precision floats
+   (quantising would silently perturb a converted baseline's byte-identical
+   replay), compact one-line literal, `-0` normalised. A save that changes
+   one key diffs as one key.
+
+---
+
+## Quick start (the demo rig)
+
+```sh
+npm install
+npm run dev            # opens /demo/ — three procedural bodies, no engine
+npm test               # node:test suite over the pure modules
+npm run verify         # headless end-to-end: pose → key → save → replay
+```
+
+In the demo: pick **scout**, choose the *attack* clip, tick **pose edit**,
+drag the staff arm (cyan), a foot (green) or the body root (amber), then
+**Save** — the key lands in `demo/clips.ts`, and on reload the baked clip
+plays your edit. `demo/bodies.ts` is the integration example: a real game
+implements the same adapter shape against its own render pipeline.
+
+---
+
+## Package layout & developing
+
+```
+src/            the package — pure TS source, consumed via your bundler
+  types.ts        the stored format (poses, keyframes, timelines)
+  sample.ts       sample a timeline at a clip-time (game + studio share it)
+  emit.ts         deterministic clips-file emitters (TS module / JSON)
+  timeline.ts     keyframe edit operations over the authored store
+  rig.ts          the bone contract: record sink + canvas FK/IK/root helpers
+  adapter.ts      the host interface the studio drives your game through
+  studio.ts       mountStudio() — the editor UI itself
+  save-plugin.ts  dev-only Vite endpoint (import directly, not via index)
+demo/           the reference integration — a procedural cast, no engine
+test/           node:test suite over the pure modules (`npm test`)
+verify/         headless Playwright end-to-end (`npm run verify`)
+bridge/         ONLY meaningful inside the donor game's repository: the
+                extraction-parity tests against that game's real data.
+                Delete this directory when lifting the package into its
+                own repo — it imports from the donor codebase by design.
+```
+
+Developing: `npm run dev` (the demo is the workbench), `npm run check`
+(strict tsc), `npm test`, `npm run verify` (the full authoring loop in
+headless Chromium — it restores `demo/clips.ts` afterwards), `npm run build`
+(bundle smoke check). CI runs all of them. The test runner imports `.ts`
+directly via Node's type stripping — hence `engines.node >= 22.18`; the
+package itself is plain browser TS with no Node requirement.
+
+The package ships as source (`main: src/index.ts`): hosts consume it through
+their own Vite/bundler exactly like their other dev tools — there is no dist
+to build or publish. `save-plugin.ts` is deliberately not re-exported from
+`index.ts` (it imports `node:fs`); import it directly in `vite.config.ts`.
+
+## Wiring it to your game
+
+Four pieces, all served by your dev server (it's a dev tool — keep it out of
+the shipped bundle):
+
+### 1. The stored format + sampler (`types.ts`, `sample.ts`)
+
+Your game imports these (or vendors copies — they're two pure leaf modules)
+and samples the authored store wherever it bakes/renders a frame:
+
+```ts
+import { poseForFrame } from 'anim-studio';
+import { ANIM_CLIPS } from './data/anim/clips'; // written by Save
+
+const pose = poseForFrame(ANIM_CLIPS[bodyId], clip, t); // undefined = procedural
+drawBody(ctx, drive, pose);
+```
+
+### 2. The rig contract (`rig.ts`)
+
+Route each limb of your draw code through a helper — or your own helpers that
+call `recordBone` the same way (see how Candlemere's `kit.ts` threads its own
+`armSwing`/`legWalk`/`bodyDrive` through one bone-record sink):
+
+```ts
+rootBone(ctx, pose, cx, cy, { dx, dy, rot }, () => {
+  fkBone(ctx, pose, shoulderX, shoulderY, proceduralAngle, () => {
+    /* draw arm + hand + weapon as ONE rigid piece */
+  });
+  ikLeg(ctx, pose, hipX, hipY, footX, footY, thighLen, shinLen, (kx, ky, fx, fy) => {
+    /* draw thigh to (kx,ky), shin to (fx,fy) */
+  });
+});
+```
+
+Each helper is the identity when nothing is authored, replays an authored
+absolute, composes a drag delta, and records its pivot for the studio's
+handles. `beginBoneRecord()`/`endBoneRecord()` around a draw captures the
+skeleton; recording is off (free) in the game's hot path.
+
+### 3. The adapter (`adapter.ts`)
+
+One page in your dev tools mounts the studio over your roster:
+
+```ts
+import { mountStudio, type StudioAdapter } from 'anim-studio';
+import { ANIM_CLIPS } from '@/data/anim/clips';
+
+const adapter: StudioAdapter = {
+  clips: ANIM_CLIPS,             // the LIVE store your bake path samples
+  bodies: () => roster,          // { id, label, group?, title?, variants? }
+  bake: (body, variants) => ({   // bake through YOUR pipeline
+    frameW, frameH,
+    clips,                       // { name, clipKey, frames, delays, retimable? }
+    plan,                        // plan[frameIndex] = { clip, t }
+    bodyId,                      // authored-store key; absent = view-only
+    frame: (i) => ({ src, x, y, w, h }),          // the real baked sheet
+    renderPose: (i, pose) => ({ canvas, fw, fh, bones }), // direct draw, recording on
+  }),
+};
+void mountStudio(adapter);
+```
+
+Derive `clips` and `plan` from the same source your game bakes from, so the
+studio can never show a reduced or stale set. `variants` (a select/toggle
+panel per body) covers loadout-style options — a hero's weapon/facing/tier.
+
+### 4. The Save endpoint (`save-plugin.ts`)
+
+```ts
+// vite.config.ts
+import { animStudioSavePlugin } from 'anim-studio/src/save-plugin';
+
+plugins: [
+  animStudioSavePlugin({
+    root: __dirname,
+    file: 'src/data/anim/clips.ts',   // .json for plain JSON
+    typesImport: `import type { BodyClips, MotionOverride } from './types';`,
+  }),
+],
+```
+
+`apply: 'serve'` — it never ships. *Copy JSON* in the UI is the offline
+fallback. **Commit to seal the animation.**
+
+---
+
+## The stored format
+
+```
+bodyId → clip id → { duration?, keys: [{ t, ease?, pose }] }
+pose:    boneId → BoneOffset
+```
+
+`BoneOffset` carries **absolute** channels (`ang`, `poke`, `flex`, `ext`,
+`draw`, `fx/fy`, `dx/dy/rot` — the bone's whole pose; a rig helper uses them
+*instead of* its procedural computation) and **relative** channels (`dAng`,
+`ikDx/ikDy` — deltas a drag writes, added on top). Sampling semantics
+(`sample.ts`): a clip-time landing **on** a key returns that key's pose
+verbatim — every channel — which is what makes a converted baseline replay
+byte-identically. Between keys, relative channels interpolate to/from 0 and
+absolute channels interpolate only when **both** keys define them (an
+absolute can't be lerped toward "unknown procedural"). Every field is
+optional; an empty pose is the identity.
+
+## Headless verification
+
+The studio exposes a driving hook (default `window.__ae`): `ready() count()
+labels() select(i) setClip(i) clips() state() setPose(on) bones()
+nudge(boneId, dAng) authoredKeys() save()`. `verify/verify.mjs` shows the
+pattern: boot in Playwright, nudge a bone, Save, reload, and assert the baked
+frame actually changed — then restore the clips file. Wire the same loop
+against your game and you have an end-to-end proof your data channel works.
+
+## Going further (patterns from the source game)
+
+- **Converted baseline** — capture the whole cast's procedural motion as
+  absolute keys (bake each body once with recording on and store each
+  helper's `val` at each frame), so the data file is a faithful, *editable*
+  copy of today's motion instead of an empty file. Refuse to write unless
+  replaying it is pixel-identical.
+- **Drift harness** — bake every body under a fixed seed and checksum every
+  frame, before vs after any change to the data channel. Zero diff = the
+  channel is provably inert; an authored knight keyframe should change
+  exactly one body's swing frames and nothing else.
+- **Durable authored layer** — if you regenerate a baseline wholesale, keep
+  hand-authored polish as an idempotent edit spec (named deltas applied onto
+  baseline keys) and re-apply it after regeneration.
+
+---
+
+MIT. Extracted from *Candlemere: The Kingdom Is Grateful*.

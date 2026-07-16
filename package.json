@@ -1,0 +1,39 @@
+{
+  "name": "anim-studio",
+  "version": "0.1.0",
+  "description": "A keyframe pose editor for procedurally-animated 2D characters, for any game and any engine: drag joints on your game's own renders, keyframe with easing and per-clip duration, and save the edits back into your source as diffable data that layers over the procedural motion — byte-identical until authored.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "verify": "node verify/verify.mjs"
+  },
+  "dependencies": {
+    "gifenc": "^1.0.3"
+  },
+  "peerDependencies": {
+    "vite": ">=5"
+  },
+  "peerDependenciesMeta": {
+    "vite": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.1"
+  }
+}
