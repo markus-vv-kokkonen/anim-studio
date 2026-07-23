@@ -146,7 +146,10 @@ a clip, tick **pose edit**, drag a joint (cyan = arm/FK, green = foot/IK, amber 
 body root), then **set key** / **clear key**, choose **ease in**, set **duration**
 (ms) for retimable clips, **reset clip** to clear a clip's authoring, and **Save**
 (or **copy JSON**). Drags write relative channels; the studio inserts/sorts keys
-and prunes empties for you. This is the primary path for a human.
+and prunes empties for you. This is the primary path for a human. (**Copy JSON**
+is the offline fallback, but it emits the pruned store *pretty-printed and
+unwrapped* — inspection-friendly, not the canonical file format; see §6 before
+committing anything seeded from it.)
 
 **B. The headless hook** (`window.__ae`) — programmatic authoring/verification
 without a human. Select a body, set a clip, `setPose(true)`, `nudge(boneId,

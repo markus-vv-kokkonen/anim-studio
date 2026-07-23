@@ -97,7 +97,10 @@ violate. Treat them as non-negotiable unless the user explicitly overrides.
    long as the draw order is stable*. Reorder your limb draw calls and every
    authored key silently remaps to the wrong joint. Call `resetBoneIds()` at the
    start of each body draw (`rootBone` does this for you), and keep limb order
-   fixed once anything is authored against it.
+   fixed once anything is authored against it. Best hardening: give each distinct
+   bone a unique `kind` (`fkBone(..., 'staffArm')` → the stable id `staffArm0`),
+   so its identity stops depending on draw position — the default shared
+   `arm`/`leg` kinds are the order-sensitive case (see `references/wiring.md`).
 
 5. **Authored tempo must never move a hazard beat.** An authored `duration`
    re-times **presentation** clips (idle/walk/hit) only — mark those `retimable`.

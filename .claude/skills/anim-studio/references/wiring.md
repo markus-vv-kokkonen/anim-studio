@@ -87,7 +87,15 @@ Supporting exports:
 **Invariants that live here:**
 - *Bone ids come from call order* (rule 4 in SKILL.md). Fix your limb draw order;
   once anything is authored against `arm1`, reordering makes `arm1` a different
-  joint and the authored key lands on the wrong limb — silently.
+  joint and the authored key lands on the wrong limb — silently. **Harden this by
+  giving each semantically-distinct bone its own `kind`:** `fkBone(...,
+  'staffArm')` yields the stable id `staffArm0` and `ikLeg(..., { kind: 'leftLeg'
+  })` yields `leftLeg0`, so the id no longer depends on where the call falls in
+  draw order — only bones that *share* a kind stay order-sensitive relative to
+  each other. The defaults put every FK arm in one `arm0/arm1/…` namespace (and
+  every leg in `leg0/leg1/…`), so a single reorder can reshuffle them all at
+  once; unique kinds confine that risk to genuinely interchangeable repeats
+  (which should still keep a fixed relative order).
 - *Draw a limb + everything rigidly attached to it inside one `fkBone` callback.*
   Splitting the arm and its weapon across two bones tears the seam when the bone
   rotates.
@@ -192,7 +200,12 @@ export default defineConfig({
 ```
 
 - The plugin is `apply: 'serve'` — it **never ships**. In the browser, **Copy
-  JSON** is the offline fallback when no endpoint is reachable.
+  JSON** is the offline fallback when no endpoint is reachable — but note it emits
+  the pruned store **pretty-printed and unwrapped** (`JSON.stringify(store, null,
+  2)`, no banner, no export), which is **not** the canonical on-disk format. If
+  you seed a file from it, re-emit through `emitClipsModule`/`emitClipsJson` (or
+  let a later endpoint Save recanonicalize) before you rely on a clean diff —
+  otherwise the first compact Save reflows the whole file.
 - **The `banner` must byte-match the header already in the file** (see how
   `vite.config.ts` copies `demo/clips.ts`'s banner exactly). A mismatch makes the
   first Save rewrite the whole header — a noisy diff. If the file's first lines
