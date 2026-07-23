@@ -201,8 +201,11 @@ export default defineConfig({
   typed TS module (`emitClipsModule`) shaped exactly like what the game imports.
 - The written file is **generated** — do not hand-edit it casually (rule 6). To
   change data by hand, edit and then re-canonicalize (see
-  `references/data-format.md`), or just re-Save from the studio. **Commit to seal
-  the animation.**
+  `references/data-format.md`), or just re-Save from the studio. Because it is a
+  generated compact one-liner, **exclude it from formatters**
+  (`.prettierignore` / `.eslintignore`, format-on-save, pre-commit) and mark it
+  `linguist-generated` — otherwise every Save fights the formatter and explodes
+  the diff. **Commit to seal the animation.**
 
 ---
 

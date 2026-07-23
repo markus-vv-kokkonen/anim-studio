@@ -106,11 +106,15 @@ violate. Treat them as non-negotiable unless the user explicitly overrides.
 
 6. **Saves are diff-stable.** The emitter deep-sorts object keys, keeps full
    float precision, normalizes `-0`, and writes a compact one-line literal so a
-   one-key edit diffs as one key. Two corollaries when you author *outside* the
-   studio: keep each timeline's `keys` array **sorted by `t`** (the emitter sorts
-   object keys but **not** array order), and keep the file **banner byte-identical**
-   to what's already there (a mismatched banner reformats the whole file). When
-   in doubt, route hand-edits back through the emitter or a studio Save to
+   one-key edit diffs as one key. Three corollaries: keep the generated clips
+   file **out of your formatters** (`.prettierignore` / `.eslintignore`,
+   format-on-save, pre-commit) and mark it `linguist-generated` — a
+   thousands-of-lines diff for a one-key edit is almost always Prettier/ESLint
+   re-expanding the compact literal; when authoring *outside* the studio, keep
+   each timeline's `keys` array **sorted by `t`** (the emitter sorts object keys
+   but **not** array order); and keep the file **banner byte-identical** to
+   what's already there (a mismatched banner reformats the whole file). When in
+   doubt, route hand-edits back through the emitter or a studio Save to
    canonicalize. **Commit to seal an animation.**
 
 ## Pick your task

@@ -207,8 +207,14 @@ const text = emitClipsModule(prunedClips(store), {
 ```
 
 Then eyeball `git diff` — a well-formed edit touches only the keys you changed.
-An exploded diff means a reformat (wrong banner, or pretty-printing crept in); a
-reordered-keys diff means the array wasn't sorted. **Commit to seal.**
+An exploded diff (thousands of lines) almost always means an **external formatter
+treating this generated file as source** — Prettier, ESLint `--fix`,
+format-on-save, or a pre-commit hook re-expanding the compact one-liner. Exclude
+the clips file from all of them (`.prettierignore` / `.eslintignore`, editor
+format-on-save, pre-commit) and mark it `linguist-generated`; its formatting is
+owned by the emitter, not the repo's style rules. (A header-only churn instead
+means a wrong banner; a small reordered-keys churn means the array wasn't
+sorted.) **Commit to seal.**
 
 ---
 
