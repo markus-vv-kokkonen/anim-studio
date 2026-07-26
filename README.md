@@ -53,10 +53,10 @@ boss). The hard-won rules are baked in as defaults.
 ## Quick start (the demo rig)
 
 ```sh
-npm install
-npm run dev            # opens /demo/ — three procedural bodies, no engine
-npm test               # node:test suite over the pure modules
-npm run verify         # headless end-to-end: pose → key → save → replay
+bun install
+bun run dev            # opens /demo/ — three procedural bodies, no engine
+bun run test           # node:test suite over the pure modules
+bun run verify         # headless end-to-end: pose → key → save → replay
 ```
 
 In the demo: pick **scout**, choose the *attack* clip, tick **pose edit**,
@@ -80,25 +80,45 @@ src/            the package — pure TS source, consumed via your bundler
   studio.ts       mountStudio() — the editor UI itself
   save-plugin.ts  dev-only Vite endpoint (import directly, not via index)
 demo/           the reference integration — a procedural cast, no engine
-test/           node:test suite over the pure modules (`npm test`)
-verify/         headless Playwright end-to-end (`npm run verify`)
+test/           node:test suite over the pure modules (`bun run test`)
+verify/         headless Playwright end-to-end (`bun run verify`)
 bridge/         ONLY meaningful inside the donor game's repository: the
                 extraction-parity tests against that game's real data.
                 Delete this directory when lifting the package into its
                 own repo — it imports from the donor codebase by design.
 ```
 
-Developing: `npm run dev` (the demo is the workbench), `npm run check`
-(strict tsc), `npm test`, `npm run verify` (the full authoring loop in
-headless Chromium — it restores `demo/clips.ts` afterwards), `npm run build`
+Developing: `bun run dev` (the demo is the workbench), `bun run check`
+(strict tsc), `bun run test`, `bun run verify` (the full authoring loop in
+headless Chromium — it restores `demo/clips.ts` afterwards), `bun run build`
 (bundle smoke check). CI runs all of them. The test runner imports `.ts`
 directly via Node's type stripping — hence `engines.node >= 22.18`; the
 package itself is plain browser TS with no Node requirement.
 
 The package ships as source (`main: src/index.ts`): hosts consume it through
 their own Vite/bundler exactly like their other dev tools — there is no dist
-to build or publish. `save-plugin.ts` is deliberately not re-exported from
-`index.ts` (it imports `node:fs`); import it directly in `vite.config.ts`.
+to build or publish. Install it pinned to a release tag:
+
+```sh
+bun  add github:markus-vv-kokkonen/anim-studio#v0.1
+# or: npm install github:markus-vv-kokkonen/anim-studio#v0.1
+```
+
+`save-plugin.ts` is deliberately not re-exported from `index.ts` (it imports
+`node:fs`); import it directly in `vite.config.ts` — and import it by a path
+**relative into `node_modules`**, not by the bare specifier:
+
+```ts
+import { animStudioSavePlugin } from './node_modules/anim-studio/src/save-plugin.ts';
+```
+
+Vite externalises bare imports when loading its own config, which hands the
+file to Node, and Node fails it twice: it cannot resolve this package's
+extensionless internal imports (`./emit`), and it refuses to type-strip a `.ts`
+file under `node_modules` at all (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`).
+A relative path is bundled by esbuild instead, which handles both. Everything
+your *game* imports (`anim-studio`, `anim-studio/src/rig.ts`, …) is resolved by
+Vite, not Node, so those stay bare specifiers as normal.
 
 ## Wiring it to your game
 
