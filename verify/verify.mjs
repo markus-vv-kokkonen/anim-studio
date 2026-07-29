@@ -146,7 +146,7 @@ try {
     const api = window.__ae;
     const key = api.addClip('walk');
     const renamed = api.renameClip(key, 'strut');
-    const patched = api.patchClip(key, { frames: 6, per: 90 });
+    const patched = api.patchClip(key, { frames: 6, fps: 30 });
     api.setClip(api.clips().indexOf('strut'));
     return { key, renamed, patched, clips: api.clips(), frames: api.state().frames };
   });

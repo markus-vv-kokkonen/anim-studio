@@ -123,10 +123,12 @@ Everything needed to build a cut-out character and hand it a skeleton rig:
 - **Joints** — per-bone: `free` (unlimited rotation), `hinge` (min/max degree
   limits, enforced when posing), `fixed` (welded — pose drags can't rotate
   it).
-- **Clips** — assembled characters own their clip list: `+ clip` to add,
-  double-click a tab to rename, `⋯` to duplicate/delete, and the inspector
-  sets frame count and duration. Clip keys stay stable across renames, so
-  timelines follow the clip.
+- **Clips** — assembled characters own their clip list: `+ new clip` to add,
+  double-click a tab to rename, `✕`/`⋯` to delete/duplicate. Timing is
+  fps-based — **60 fps by default, configurable per clip** — with duration,
+  fps, and frame count editable in the inspector (a new clip is 60 frames @
+  60 fps = one second). Clip keys stay stable across renames, so timelines
+  follow the clip.
 - **Animating** — an assembled body poses exactly like a procedural one:
   drag rotates a joint (within its limits), Shift-drag translates it, keys
   land on the dope sheet where they can be dragged between frames,

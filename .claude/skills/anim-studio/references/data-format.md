@@ -244,7 +244,7 @@ node-testable). One doc is one self-contained unit:
 SkeletonFile: { version: 1, skeletons: { <docId>: SkeletonDoc } }
 SkeletonDoc:  { id, name, fw, fh, bones: SkelBone[], clips: SkelClip[], timelines: BodyClips }
 SkelBone:     { id, parent, x, y, rot, sx, sy, len, z, joint, img? }
-SkelClip:     { key, name, frames, per }         // key stable, name renamable
+SkelClip:     { key, name, frames, fps }         // key stable, name renamable
 ```
 
 - **Bone ids are explicit unique names** (unlike procedural bodies' draw-order
@@ -265,10 +265,14 @@ SkelClip:     { key, name, frames, per }         // key stable, name renamable
   continuously. The file also carries the shared **parts bin** (`parts:
   [{name, src, w, h}]`) so imports survive reloads.
 - **Clip keys are stable across renames** (`walk` stays `walk` when the display
-  name becomes "strut"), so timelines never detach; `frames` × `per` (ms) is
-  the sampling grid, `t = i/(frames-1)`. Changing a clip's frame count via
-  `patchClip` **snaps existing keys to the new grid** (nearest frame; colliding
-  keys keep the earliest) so every key stays on-frame and strip-editable.
+  name becomes "strut"), so timelines never detach. Timing is **fps-based**
+  (default 60, per-clip configurable, fractional allowed): duration =
+  `frames / fps`, sampled at `t = i/(frames-1)`. Legacy files carrying `per`
+  (ms/frame) convert on load. Changing a clip's frame count via `patchClip`
+  **snaps existing keys to the new grid** (nearest frame; colliding keys keep
+  the earliest); changing `fps` never moves keys (`t` is normalised). In the
+  studio, editing the duration re-counts frames at the clip's fps, and
+  editing fps re-counts frames to keep the duration.
 - **Serialisation** (`packSkeletons` / `unpackSkeletons`) is canonical like the
   clips emitter — deep-sorted keys, bones sorted by draw order, empty timelines
   pruned, trailing newline — and `unpackSkeletons` is defensive (defaults

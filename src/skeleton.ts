@@ -114,12 +114,13 @@ export interface SkelBone {
 }
 
 /** A user-defined clip: `key` is the stable timeline id, `name` the renamable
- *  display label, `frames` × `per` (ms) the sampling grid. */
+ *  display label. Timing is fps-based: the clip runs `frames` samples at
+ *  `fps` frames/second, so duration = frames / fps (60 frames @ 60fps = 1s). */
 export interface SkelClip {
   key: string;
   name: string;
   frames: number;
-  per: number;
+  fps: number;
 }
 
 /** One assembled character — self-contained: rig, clips, and authored
@@ -213,7 +214,7 @@ export function createSkeleton(id: string, name: string, fw = 192, fh = 192): Sk
     z: 0,
     joint: { type: 'free', min: 0, max: 0 },
   });
-  addClip(doc, 'idle', 8, 120);
+  addClip(doc, 'idle'); // 60 frames @ 60fps = one second
   return doc;
 }
 
@@ -389,8 +390,8 @@ export function worldTransforms(doc: SkeletonDoc, pose?: Pose): Map<string, Mat2
 // clip ops
 // ---------------------------------------------------------------------------
 
-export function addClip(doc: SkeletonDoc, name: string, frames = 8, per = 120): SkelClip {
-  const clip: SkelClip = { key: uniqueClipKey(doc, name), name: name.trim() || 'clip', frames: clampFrames(frames), per: clampPer(per) };
+export function addClip(doc: SkeletonDoc, name: string, frames = 60, fps = 60): SkelClip {
+  const clip: SkelClip = { key: uniqueClipKey(doc, name), name: name.trim() || 'clip', frames: clampFrames(frames), fps: clampFps(fps) };
   doc.clips.push(clip);
   return clip;
 }
@@ -417,14 +418,15 @@ export function removeClip(doc: SkeletonDoc, key: string): boolean {
 export function duplicateClip(doc: SkeletonDoc, key: string): SkelClip | null {
   const c = doc.clips.find((x) => x.key === key);
   if (!c) return null;
-  const copy = addClip(doc, c.name + ' copy', c.frames, c.per);
+  const copy = addClip(doc, c.name + ' copy', c.frames, c.fps);
   const tl = doc.timelines[key];
   if (tl) doc.timelines[copy.key] = JSON.parse(JSON.stringify(tl)) as BodyClips[string];
   return copy;
 }
 
-const clampFrames = (n: number): number => Math.max(1, Math.min(120, Math.round(n) || 1));
-const clampPer = (n: number): number => Math.max(16, Math.min(2000, Math.round(n) || 120));
+const clampFrames = (n: number): number => Math.max(1, Math.min(600, Math.round(n) || 1));
+/** Fractional fps allowed (legacy per-ms clips convert to e.g. 8.33). */
+const clampFps = (n: number): number => Math.max(1, Math.min(240, Number(n) || 60));
 
 /** Snap a timeline's keys onto a new frame grid (t = k/(n-1)) so every key
  *  stays ON a frame — an off-grid key would still sample but could no longer
@@ -446,7 +448,7 @@ function snapKeysToGrid(tl: ClipTimelineLike | undefined, frames: number): void 
 }
 type ClipTimelineLike = BodyClips[string];
 
-export function patchClip(doc: SkeletonDoc, key: string, patch: { frames?: number; per?: number }): boolean {
+export function patchClip(doc: SkeletonDoc, key: string, patch: { frames?: number; fps?: number }): boolean {
   const c = doc.clips.find((x) => x.key === key);
   if (!c) return false;
   if (patch.frames !== undefined) {
@@ -456,7 +458,7 @@ export function patchClip(doc: SkeletonDoc, key: string, patch: { frames?: numbe
       snapKeysToGrid(doc.timelines[key], next);
     }
   }
-  if (patch.per !== undefined) c.per = clampPer(patch.per);
+  if (patch.fps !== undefined) c.fps = clampFps(patch.fps);
   return true;
 }
 
@@ -544,8 +546,9 @@ export function unpackSkeletons(text: string): { skeletons: SkeletonDoc[]; parts
       clips: clipsRaw.map((c, i) => ({
         key: str(c.key, `clip${i}`),
         name: str(c.name, str(c.key, `clip ${i + 1}`)),
-        frames: clampFrames(num(c.frames, 8)),
-        per: clampPer(num(c.per, 120)),
+        frames: clampFrames(num(c.frames, 60)),
+        // fps-based; legacy files carried per-frame ms instead
+        fps: clampFps(typeof c.fps === 'number' ? (c.fps as number) : 1000 / num(c.per, 1000 / 60)),
       })),
       timelines: (raw.timelines && typeof raw.timelines === 'object' ? raw.timelines : {}) as BodyClips,
     };

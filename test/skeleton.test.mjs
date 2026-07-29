@@ -122,13 +122,15 @@ test('draw order: bonesByZ sorts, moveBoneZ swaps neighbours', () => {
 
 test('clip CRUD: add/rename/patch/duplicate/remove, last clip protected', () => {
   const doc = createSkeleton('c', 'c');
-  const walk = addClip(doc, 'walk', 10, 90);
+  assert.equal(doc.clips[0].fps, 60); // 60fps default: 60 frames = one second
+  assert.equal(doc.clips[0].frames, 60);
+  const walk = addClip(doc, 'walk', 10, 30);
   assert.equal(walk.key, 'walk');
   assert.ok(renameClip(doc, 'walk', 'stride'));
   assert.equal(doc.clips.find((x) => x.key === 'walk').name, 'stride'); // key stable across rename
-  assert.ok(patchClip(doc, 'walk', { frames: 200, per: 1 }));
-  assert.equal(doc.clips.find((x) => x.key === 'walk').frames, 120); // clamped
-  assert.equal(doc.clips.find((x) => x.key === 'walk').per, 16); // clamped
+  assert.ok(patchClip(doc, 'walk', { frames: 2000, fps: 900 }));
+  assert.equal(doc.clips.find((x) => x.key === 'walk').frames, 600); // clamped
+  assert.equal(doc.clips.find((x) => x.key === 'walk').fps, 240); // clamped
   doc.timelines.walk = { keys: [{ t: 0.5, pose: { root: { dAng: 1 } } }] };
   const dup = duplicateClip(doc, 'walk');
   assert.equal(dup.name, 'stride copy');
@@ -141,7 +143,8 @@ test('clip CRUD: add/rename/patch/duplicate/remove, last clip protected', () => 
 });
 
 test('patchClip frame-count change snaps keys to the new grid', () => {
-  const doc = createSkeleton('c', 'c'); // idle: 8 frames
+  const doc = createSkeleton('c', 'c');
+  patchClip(doc, 'idle', { frames: 8 });
   doc.timelines.idle = { keys: [
     { t: 0, pose: { root: { dAng: 1 } } },
     { t: 3 / 7, pose: { root: { dAng: 2 } } },
@@ -152,6 +155,18 @@ test('patchClip frame-count change snaps keys to the new grid', () => {
   patchClip(doc, 'idle', { frames: 2 }); // collisions keep the earliest key
   assert.deepEqual(doc.timelines.idle.keys.map((k) => k.pose.root.dAng), [1, 2]);
   assert.deepEqual(doc.timelines.idle.keys.map((k) => k.t), [0, 1]);
+  // fps changes never move keys (t is normalised clip-time)
+  patchClip(doc, 'idle', { fps: 24 });
+  assert.deepEqual(doc.timelines.idle.keys.map((k) => k.t), [0, 1]);
+});
+
+test('unpack converts legacy per-ms clips to fps', () => {
+  const [doc] = unpackSkeletons(JSON.stringify({
+    version: 1,
+    skeletons: { old: { bones: [], clips: [{ key: 'idle', name: 'idle', frames: 8, per: 125 }] } },
+  })).skeletons;
+  assert.equal(doc.clips[0].fps, 8); // 125ms per frame = 8fps
+  assert.equal(doc.clips[0].frames, 8);
 });
 
 test('pack → unpack round-trips a doc (bones by z, empty timelines pruned)', () => {

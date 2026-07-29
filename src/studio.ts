@@ -77,7 +77,7 @@ export interface StudioApi {
   addClip(name: string): string | null;
   renameClip(key: string, name: string): boolean;
   deleteClip(key: string): boolean;
-  patchClip(key: string, patch: { frames?: number; per?: number }): boolean;
+  patchClip(key: string, patch: { frames?: number; fps?: number }): boolean;
   // assembled characters
   skeletons(): { id: string; name: string; bones: number; clips: number }[];
   newSkeleton(name: string): string;
@@ -414,8 +414,10 @@ const SHELL = `
       <h3>Clip timing</h3>
       <div class="as-field"><label>duration (ms)</label>
         <input type="number" data-as="cDur" min="60" max="8000" step="10" style="width:78px" /></div>
+      <div class="as-field as-hidden" data-as="cFpsRow"><label>fps</label>
+        <input type="number" data-as="cFps" min="1" max="240" step="1" style="width:78px" /></div>
       <div class="as-field as-hidden" data-as="cFramesRow"><label>frames</label>
-        <input type="number" data-as="cFrames" min="1" max="120" step="1" style="width:78px" /></div>
+        <input type="number" data-as="cFrames" min="1" max="600" step="1" style="width:78px" /></div>
       <div class="as-field" data-as="iFramesRow"><label>frames</label><span data-as="iFrames">—</span></div>
     </div>
     <div class="as-sect">
@@ -496,6 +498,8 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   const tDur = $<HTMLInputElement>('tDur');
   const cFrames = $<HTMLInputElement>('cFrames');
   const cFramesRow = $<HTMLDivElement>('cFramesRow');
+  const cFps = $<HTMLInputElement>('cFps');
+  const cFpsRow = $<HTMLDivElement>('cFpsRow');
   const kEase = $<HTMLSelectElement>('kEase');
   const kCount = $<HTMLSpanElement>('kCount');
   const saveBtn = $<HTMLButtonElement>('saveBtn');
@@ -1282,6 +1286,13 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     dopeEl.innerHTML = '';
     dopeCells = [];
     if (!current) return;
+    if (clip.frames.length > 96) {
+      const note = document.createElement('div');
+      note.className = 'as-note';
+      note.textContent = `${clip.frames.length} frames — too dense to strip; author on the keys timeline (lower the fps to see a strip)`;
+      dopeEl.appendChild(note);
+      return;
+    }
     const bodyId = current.body.bodyId;
     const keyedIdx: number[] = [];
     clip.frames.forEach((fi, i) => {
@@ -1471,7 +1482,8 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const rebuildKey = `${roster[selected]?.id}|${clipIdx}|${n}|${dopeRev}`;
     if (rebuildKey !== tlineKey) {
       tlineEl.innerHTML = '';
-      for (let i = 0; i < n; i++) {
+      const step = Math.max(1, Math.ceil(n / 60)); // don't wallpaper dense grids
+      for (let i = 0; i < n; i += step) {
         const d = document.createElement('div');
         d.className = 'ttick';
         d.style.left = tpos(n <= 1 ? 0 : i / (n - 1));
@@ -2051,11 +2063,16 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const doc = curDoc();
     editCharRow.classList.toggle('as-hidden', !doc);
     cFramesRow.classList.toggle('as-hidden', !doc);
+    cFpsRow.classList.toggle('as-hidden', !doc);
     $('iFramesRow').classList.toggle('as-hidden', !!doc); // editable field replaces it
     const clip = activeClip();
     iFrames.textContent = clip ? String(clip.frames.length) : '—';
     if (clip) cDur.value = String(Math.round(effDelays(clip).reduce((a, b2) => a + b2, 0)));
-    if (doc && clip) cFrames.value = String(clip.frames.length);
+    if (doc && clip) {
+      cFrames.value = String(clip.frames.length);
+      const fps = doc.clips.find((c) => c.key === clip.clipKey)?.fps ?? 60;
+      cFps.value = String(Math.round(fps * 100) / 100);
+    }
     renderVariants(row);
   }
 
@@ -2404,8 +2421,10 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const doc = curDoc();
     const clip = activeClip();
     if (doc && clip) {
-      const per = Math.round((ms || clipDurationMs()) / Math.max(1, clip.frames.length));
-      withDocHistory(doc, 'clip duration', () => skelPatchClip(doc, clip.clipKey, { per }));
+      // fps stays put; the duration decides how many frames sample it
+      const fps = doc.clips.find((c) => c.key === clip.clipKey)?.fps ?? 60;
+      const frames = Math.max(1, Math.round(((ms || clipDurationMs()) * fps) / 1000));
+      withDocHistory(doc, 'clip duration', () => skelPatchClip(doc, clip.clipKey, { frames }));
       refreshSkelBody();
     } else {
       withClipsHistory('clip duration', bodyId, () => {
@@ -2421,6 +2440,16 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const clip = activeClip();
     if (!doc || !clip) return;
     withDocHistory(doc, 'clip frames', () => skelPatchClip(doc, clip.clipKey, { frames: Number(cFrames.value) || clip.frames.length }));
+    refreshSkelBody();
+  };
+  cFps.onchange = () => {
+    const doc = curDoc();
+    const clip = activeClip();
+    if (!doc || !clip) return;
+    // keep the DURATION: re-count the frames at the new rate
+    const dur = clipDurationMs();
+    const fps = Math.max(1, Math.min(240, Number(cFps.value) || 60));
+    withDocHistory(doc, 'clip fps', () => skelPatchClip(doc, clip.clipKey, { fps, frames: Math.max(1, Math.round((dur * fps) / 1000)) }));
     refreshSkelBody();
   };
   $('resetClip').onclick = () => {
