@@ -109,4 +109,13 @@ export interface StudioAdapter {
    *  (default `/__anim/skeletons` — see save-plugin.ts `skeletonsFile`). When
    *  the endpoint is unreachable the studio persists to localStorage instead. */
   skeletons?: { endpoint?: string };
+  /** Project-picker wiring: GET/POST target listing the working directories
+   *  this studio can edit (see project-plugin.ts). Set it and the header grows
+   *  a project dropdown; omit it and there is none.
+   *
+   *  Opting in EXPLICITLY, rather than just probing the endpoint, is
+   *  deliberate: a host can be served by a dev server that happens to run the
+   *  project plugin for something else, and a picker that silently reloads
+   *  without changing anything that host reads is worse than no picker. */
+  projects?: { endpoint?: string };
 }

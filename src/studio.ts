@@ -125,6 +125,11 @@ const CSS = `
   border-radius:4px; cursor:pointer; font-size:11px; }
 .as-app .as-mini:hover { border-color:var(--accent); color:var(--ink); }
 .as-app .as-danger:hover { border-color:var(--danger) !important; color:var(--danger) !important; }
+.as-proj { display:flex; align-items:center; gap:5px; color:var(--dim); font-size:11px; }
+.as-proj select { background:var(--panel2); border:1px solid var(--edge); color:var(--ink);
+  border-radius:6px; padding:3px 6px; font:inherit; font-size:11px; }
+.as-proj select:hover { border-color:var(--accent); }
+.as-proj select:disabled { opacity:.5; }
 .as-helpbtn { border:1px solid var(--edge); background:var(--panel2); color:var(--dim); width:22px; height:22px;
   border-radius:50%; cursor:pointer; }
 .as-helpbtn:hover { border-color:var(--accent); color:var(--ink); }
@@ -337,6 +342,9 @@ const SHELL = `
   </nav>
   <span class="sub" data-as="subtitle">skeletal pose / keyframe editor · dev tool</span>
   <span class="status" data-as="status">booting…</span>
+  <label class="as-proj" data-as="projWrap" hidden>project
+    <select data-as="project" title="which project's characters this studio is editing"></select>
+  </label>
   <button class="as-helpbtn" data-as="helpBtn" title="shortcuts + help (?)">?</button>
 </header>
 <div class="as-main" data-as="animMain">
@@ -535,6 +543,60 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
       setTimeout(() => t.remove(), 250);
     }, 2600);
   }
+
+  /**
+   * The project picker — present only when a project host is serving.
+   *
+   * Switching project changes which skeletons file, which art directory and
+   * which clip store the whole tool is looking at, and those are threaded
+   * through the studio's boot (docs, parts, roster, bake cache). Re-deriving
+   * all of that live would be a second, rarely-exercised initialisation path;
+   * a reload re-runs the one that is exercised every time the tool starts.
+   * Switching project is a per-session act, not a per-minute one, so the
+   * reload costs nothing worth engineering around.
+   */
+  async function mountProjectPicker(): Promise<void> {
+    if (!host.projects) return; // host did not opt in — no picker, no request
+    const projEndpoint = host.projects.endpoint ?? '/__anim/projects';
+    let info: { active: string; projects: { id: string; name: string }[] };
+    try {
+      const res = await fetch(projEndpoint, { headers: { accept: 'application/json' } });
+      if (!res.ok) return;
+      info = (await res.json()) as typeof info;
+    } catch {
+      return; // no project host serving — the picker simply does not exist
+    }
+    if (!info.projects?.length) return;
+
+    const wrap = $<HTMLLabelElement>('projWrap');
+    const sel = $<HTMLSelectElement>('project');
+    for (const p of info.projects) {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    }
+    sel.value = info.active;
+    wrap.hidden = false;
+
+    sel.addEventListener('change', () => {
+      const id = sel.value;
+      sel.disabled = true;
+      const fail = (): void => {
+        sel.disabled = false;
+        sel.value = info.active;
+        toast('⚠ could not switch project');
+      };
+      void fetch(projEndpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+        .then((r) => (r.ok ? location.reload() : fail()))
+        .catch(fail);
+    });
+  }
+  void mountProjectPicker();
 
   let modalResolve: ((ok: boolean) => void) | null = null;
   function closeModal(ok = false): void {

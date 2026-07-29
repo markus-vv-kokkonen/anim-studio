@@ -28,5 +28,6 @@ export function projectAdapter(): StudioAdapter {
     // whichever registered first wins — which showed up as the standalone
     // studio confidently serving the demo's characters for every project.
     skeletons: { endpoint: '/__anim/project-skeletons' },
+    projects: {},
   };
 }
