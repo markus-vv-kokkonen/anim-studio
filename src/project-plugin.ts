@@ -146,7 +146,15 @@ export function animStudioProjectPlugin(opts: ProjectPluginOptions): Plugin {
         } catch (e) {
           return sendJson(w, 500, { ok: false, error: String(e) });
         }
-        if (!cfg) return next();
+        // No config → answer an empty document, do NOT fall through. Falling
+        // through lands on Vite's html fallback, so the studio's loader gets
+        // `<!doctype html>` where it expects JSON and dies on parse.
+        if (!cfg) {
+          w.statusCode = 200;
+          w.setHeader('content-type', 'application/json');
+          w.end(EMPTY_SKELETONS);
+          return;
+        }
         const proj = active(cfg);
         const file = path.resolve(proj.root, proj.skeletonsFile);
         w.setHeader('content-type', 'application/json');

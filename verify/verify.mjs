@@ -197,6 +197,40 @@ try {
   const deleted = await page.evaluate(() => window.__ae.deleteSkeleton('test_hero'));
   if (!deleted) fail('deleteSkeleton failed');
 
+  // --- project host: the endpoint answers, and opt-in gates the picker ------
+  // anim-studio.config.json is gitignored (absolute, machine-specific paths),
+  // so a fresh clone and CI have none. The plugin answers with an empty list
+  // rather than erroring, and this leg asserts BOTH shapes rather than
+  // assuming the developer's own config is present.
+  {
+    const res = await fetch(`http://localhost:${port}/__anim/projects`, { headers: { accept: 'application/json' } });
+    if (!res.ok) fail('GET /__anim/projects should answer 200');
+    const info = await res.json();
+    if (!Array.isArray(info.projects)) fail(`projects should be a list, got ${JSON.stringify(info)}`);
+    out.projects = info.projects.length;
+
+    if (info.projects.length > 0) {
+      if (!info.active) fail('an active project should be named when projects exist');
+      // Node's fetch, NOT the page: a deliberate 404 seen by the browser would
+      // land in `notFound` and fail the whole run.
+      const bad = await fetch(`http://localhost:${port}/__anim/projects`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ id: '__nope__' }),
+      });
+      if (bad.status !== 404) fail(`an unknown project id should 404, got ${bad.status}`);
+    }
+
+    const skels = await fetch(`http://localhost:${port}/__anim/project-skeletons`);
+    if (!skels.ok) fail('GET /__anim/project-skeletons should answer 200');
+    JSON.parse(await skels.text()); // must be valid JSON even when the file is absent
+  }
+
+  // The demo host never opts in (no `projects` on its adapter), so it must
+  // show no picker even though this very server runs the project plugin.
+  out.demoPickerHidden = await page.evaluate(() => document.querySelector('[data-as="projWrap"]')?.hidden);
+  if (out.demoPickerHidden !== true) fail('a host that did not opt in must show no project picker');
+
   out.errors = errors;
   out.notFound = notFound.filter((p) => p !== '/favicon.ico'); // favicon 404 is benign
   if (errors.length) fail(`console errors: ${errors.join(' | ')}`);

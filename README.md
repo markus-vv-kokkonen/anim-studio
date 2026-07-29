@@ -102,6 +102,56 @@ game-integration path; assembled characters are yours to edit freely.
 
 ---
 
+## Standalone: editing another project's characters
+
+The studio also runs on its own and edits characters that live in *another*
+repo — the tool here, the data there. No host game has to mount it, and no
+character document has to leave the project it belongs to.
+
+```sh
+cp anim-studio.config.example.json anim-studio.config.json   # then edit the paths
+bun run dev                                                  # http://localhost:5199/
+```
+
+`anim-studio.config.json` is **gitignored** — it holds absolute, machine-specific
+paths — and lists the projects you can edit:
+
+```json
+{
+  "active": "heft",
+  "projects": [{
+    "id": "heft",
+    "name": "HEFT",
+    "root": "/absolute/path/to/your/game",
+    "publicDir": "public",
+    "skeletonsFile": "src/data/anim/skeletons.json"
+  }]
+}
+```
+
+The server serves `<root>/<publicDir>` at its own root, so a bone's
+`src: "art/chars/podge_head.png"` resolves to the game's real art. That is what
+lets a character reference its parts **by path** instead of embedding each one
+as a base64 data URI: documents stay small, diffable, and in step with whatever
+pipeline generates the art. Assemble-mode edits autosave to
+`<root>/<skeletonsFile>`.
+
+Pick the project from the dropdown in the header; switching reloads. The
+picker appears only when an adapter opts in with `projects: {}` — see
+`src/project-adapter.ts` — so a host served by the same dev server (the demo
+at `/demo/` is exactly that) gets no picker rather than a misleading one.
+
+Endpoints: `GET`/`POST /__anim/projects` (list + switch) and
+`GET`/`POST /__anim/project-skeletons` (the active project's characters).
+The project host deliberately does **not** reuse `/__anim/skeletons` — a host
+running `save-plugin.ts` as well would claim the same path, and whichever
+registered first would silently win.
+
+The embedded path (`save-plugin.ts` in a host's own `vite.config.ts`) is
+unchanged.
+
+---
+
 ## Assemble mode — characters from parts
 
 Everything needed to build a cut-out character and hand it a skeleton rig:
