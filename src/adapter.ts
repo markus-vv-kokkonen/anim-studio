@@ -105,4 +105,8 @@ export interface StudioAdapter {
   /** Save wiring: POST target for the authored store (see save-plugin.ts) and
    *  the hint line shown under the Save button. */
   save?: { endpoint?: string; hint?: string };
+  /** Assembled-characters wiring: GET/POST target for the skeletons file
+   *  (default `/__anim/skeletons` — see save-plugin.ts `skeletonsFile`). When
+   *  the endpoint is unreachable the studio persists to localStorage instead. */
+  skeletons?: { endpoint?: string };
 }

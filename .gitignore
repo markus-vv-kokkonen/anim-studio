@@ -1,2 +1,5 @@
 node_modules
 dist
+package-lock.json
+verify/verify-shot.png
+verify/verify-shot-assemble.png

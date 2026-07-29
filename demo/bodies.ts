@@ -174,12 +174,15 @@ function drawScout(ctx: CanvasRenderingContext2D, d: Drive, pose: Pose | undefin
       ctx.closePath();
       ctx.fill();
     }
-    // torso + head
+    // torso
     px(ctx, 27, 19, 10, 15, C.green);
     px(ctx, 27, 19, 10, 4, C.lime); // collar
-    px(ctx, 27.5, 9, 9, 10, C.orange); // head
-    px(ctx, 33, 12, 2, 2, C.ink); // eye
-    px(ctx, 27.5, 9, 9, 3, C.charcoal); // hood brim
+    // head (head0) — its own 'head' kind, so the id never depends on draw order
+    fkBone(ctx, pose, 32, 19, breathe * 0.03 + s * 0.06 - d.flinch * 0.18, () => {
+      px(ctx, 27.5, 9, 9, 10, C.orange); // head
+      px(ctx, 33, 12, 2, 2, C.ink); // eye
+      px(ctx, 27.5, 9, 9, 3, C.charcoal); // hood brim
+    }, 'head');
     // weapon arm (arm1) — the strike; the whole limb + weapon move as one bone
     fkBone(ctx, pose, 34, 21, s * 1.35 + (walking ? stepB * 0.35 : 0) - d.flinch * 0.6 + breathe * 0.04, () => {
       limb(ctx, 34, 21, 36, 31, 3, C.green);
@@ -189,8 +192,9 @@ function drawScout(ctx: CanvasRenderingContext2D, d: Drive, pose: Pose | undefin
         limb(ctx, 36, 38, 36, 18, 2, C.yellow);
         px(ctx, 34.5, 16, 4, 4, C.cyan); // charm
       } else if (w === 'sword') {
-        limb(ctx, 36, 31, 36, 15, 2.5, C.silver);
-        px(ctx, 33.5, 29, 6, 2, C.yellow); // crossguard
+        // blade points FORWARD from the grip (not up the face), guard at the hilt
+        limb(ctx, 36, 31, 52, 31, 2.5, C.silver);
+        px(ctx, 37.5, 27.5, 2, 7, C.yellow); // crossguard
       }
     });
   });
@@ -230,11 +234,14 @@ function drawBrute(ctx: CanvasRenderingContext2D, d: Drive, pose: Pose | undefin
       limb(ctx, kx, ky, fx, fy, 4.5, C.slate);
       px(ctx, fx - 3, fy - 2, 7, 4, C.ink);
     });
-    // torso + head
+    // torso
     px(ctx, 28, 20, 16, 18, C.red);
     px(ctx, 28, 20, 16, 5, C.orange); // shoulders
-    px(ctx, 30, 10, 12, 10, C.orange); // head
-    px(ctx, 38, 13, 2, 3, C.ink); // eye
+    // head (head0) — its own 'head' kind, so the id never depends on draw order
+    fkBone(ctx, pose, 36, 20, s * 0.08 - d.flinch * 0.2 + breathe * 0.02, () => {
+      px(ctx, 30, 10, 12, 10, C.orange); // head
+      px(ctx, 38, 13, 2, 3, C.ink); // eye
+    }, 'head');
     fkBone(ctx, pose, 42, 24, s * 1.5 + (walking ? stepB * 0.3 : 0) - d.flinch * 0.6, () => {
       limb(ctx, 42, 24, 46, 37, 5, C.red);
       px(ctx, 43, 35, 6, 6, C.orange); // fist
@@ -330,17 +337,12 @@ export function demoAdapter(store: ClipStore): StudioAdapter {
     subtitle: 'demo rig · drag joints, keyframe, save',
     clips: store,
     save: { hint: 'Save writes demo/clips.ts via the dev server; commit to seal it.' },
+    skeletons: {}, // default endpoint — the vite plugin persists demo/skeletons.json
     bodies: () => CAST.map((s) => s.desc),
     bake(body: BodyDesc, variants: VariantValues): BakedBody | null {
       const spec = CAST.find((s) => s.desc.id === body.id);
       if (!spec) return null;
       const bodyId = spec.bodyId?.(variants);
-      // Bake exactly like a game would: sample the AUTHORED store per frame and
-      // layer it over the procedural pose — an authored key changes the bake.
-      const frames = spec.plan.map((pf, i) => {
-        const pose = bodyId ? poseForFrame(store[bodyId], pf.clip, pf.t) : undefined;
-        return renderFrame(spec, i, pose, variants, false).canvas;
-      });
       return {
         frameW: spec.fw,
         frameH: spec.fh,
@@ -348,7 +350,15 @@ export function demoAdapter(store: ClipStore): StudioAdapter {
         plan: spec.plan,
         bodyId,
         info: spec.info?.(variants),
-        frame: (i) => (frames[i] ? { src: frames[i], x: 0, y: 0, w: spec.fw, h: spec.fh } : null),
+        // Render exactly like a game bake would: sample the AUTHORED store and
+        // layer it over the procedural pose. Sampling happens per call, so a
+        // keyframe edit shows in the very next preview frame — no re-bake.
+        frame(i) {
+          const pf = spec.plan[i];
+          if (!pf) return null;
+          const pose = bodyId ? poseForFrame(store[bodyId], pf.clip, pf.t) : undefined;
+          return { src: renderFrame(spec, i, pose, variants, false).canvas, x: 0, y: 0, w: spec.fw, h: spec.fh };
+        },
         renderPose: spec.draw ? (i, pose) => renderFrame(spec, i, pose, variants, true) : undefined,
       };
     },

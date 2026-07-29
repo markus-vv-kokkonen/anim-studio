@@ -1,7 +1,8 @@
 # anim-studio
 
 A keyframe pose editor for **procedurally-animated 2D characters** — for any
-game, any engine.
+game, any engine — plus a **character assembly workbench** for building
+skeletal characters out of image parts.
 
 Your game draws its characters in code; their motion comes from pose
 functions. Editing that motion usually means tweaking a magic number blind,
@@ -12,10 +13,20 @@ re-plant, the body root tilts), set keyframes with easing and per-clip
 duration, and Save — the edit lands in your game's own source as diffable,
 version-controlled data that both you and an agent can iterate on.
 
-Extracted and generalized from the Animation Studio of *Candlemere: The
-Kingdom Is Grateful*, where it poses a cast of ~190 procedurally-drawn bodies
-(the hero across every weapon × facing × wear tier, ~104 foes, and every
-boss). The hard-won rules are baked in as defaults.
+The studio has two modes, Spine-style:
+
+- **Animate** — the keyframe editor above, over every body in the roster.
+  Keys move on the dope sheet (drag), copy/paste between frames, and every
+  edit is undoable.
+- **Assemble** — import pictures, attach them as bones, drag/rotate/scale
+  them into a rig, parent bones into a hierarchy, and configure each joint
+  (free / hinge with limits / welded). Assembled characters join the roster
+  as poseable bodies whose clips you create, rename, retime, duplicate, and
+  delete freely.
+
+Extracted and generalized from a shipped game's internal animation studio,
+where it posed a cast of ~190 procedurally-drawn bodies. The hard-won rules
+are baked in as defaults.
 
 ---
 
@@ -56,7 +67,8 @@ boss). The hard-won rules are baked in as defaults.
 bun install
 bun run dev            # opens /demo/ — three procedural bodies, no engine
 bun run test           # node:test suite over the pure modules
-bun run verify         # headless end-to-end: pose → key → save → replay
+bun run verify         # headless end-to-end: pose → key → save → replay,
+                       # then assemble → clip CRUD → key CRUD → reload
 ```
 
 In the demo: pick **scout**, choose the *attack* clip, tick **pose edit**,
@@ -64,6 +76,50 @@ drag the staff arm (cyan), a foot (green) or the body root (amber), then
 **Save** — the key lands in `demo/clips.ts`, and on reload the baked clip
 plays your edit. `demo/bodies.ts` is the integration example: a real game
 implements the same adapter shape against its own render pipeline.
+
+Then switch to **Assemble** in the header: create a character, import a few
+PNGs (or drop them on the canvas), click a part to attach it as a bone under
+the selection, and drag it into place — the gizmo moves, the round handle
+rotates (Shift snaps to 15°), the square handle scales; the inspector has the
+numeric fields, parent dropdown, joint config, and draw order. Press **?**
+anywhere for the shortcut list.
+
+---
+
+## Assemble mode — characters from parts
+
+Everything needed to build a cut-out character and hand it a skeleton rig:
+
+- **Parts** — import images (file picker or drag-drop onto the canvas). Each
+  import is capped at 512px on the long edge and embedded as a data URI, so a
+  character document is fully self-contained.
+- **Bones** — a part attaches as a new bone under the selected bone; empty
+  bones (`+ bone`) give the rig structure. Select on canvas or in the
+  skeleton tree; move / rotate / scale with the gizmo or the inspector's
+  numeric fields; arrows nudge (Shift ×10). Bone names are the stable ids
+  authored keys attach to — renaming a bone rewrites its keys, so data never
+  detaches.
+- **Hierarchy** — reparent via the inspector dropdown (cycle-guarded; the
+  bone keeps its world placement), reorder drawing with back/front, delete a
+  bone with its subtree.
+- **Joints** — per-bone: `free` (unlimited rotation), `hinge` (min/max degree
+  limits, enforced when posing), `fixed` (welded — pose drags can't rotate
+  it).
+- **Clips** — assembled characters own their clip list: `+ clip` to add,
+  double-click a tab to rename, `⋯` to duplicate/delete, and the inspector
+  sets frame count and duration. Clip keys stay stable across renames, so
+  timelines follow the clip.
+- **Animating** — an assembled body poses exactly like a procedural one:
+  drag rotates a joint (within its limits), Shift-drag translates it, keys
+  land on the dope sheet where they can be dragged between frames,
+  copied/pasted, and undone (`Ctrl+Z` spans both modes).
+- **Persistence** — characters (rig + clips + keyframe timelines, one JSON
+  unit each) autosave to the dev server's skeletons endpoint when the save
+  plugin is configured with `skeletonsFile` (the demo writes
+  `demo/skeletons.json`), else to localStorage. `↓ save` / `↑ load` in the
+  Characters panel export/import the same JSON by hand. Assembled timelines
+  live under `sk:<id>` store keys and are **never** written into the game's
+  clips file — Save keeps your game data clean.
 
 ---
 
@@ -76,16 +132,16 @@ src/            the package — pure TS source, consumed via your bundler
   emit.ts         deterministic clips-file emitters (TS module / JSON)
   timeline.ts     keyframe edit operations over the authored store
   rig.ts          the bone contract: record sink + canvas FK/IK/root helpers
+  skeleton.ts     assembled characters: skeleton doc format + pure ops
+  skeleton-render.ts  draw a skeleton doc / wrap it as a roster body
+  assembly.ts     Assemble mode — the parts-to-rig editor pane
+  history.ts      the shared undo/redo stack
   adapter.ts      the host interface the studio drives your game through
-  studio.ts       mountStudio() — the editor UI itself
+  studio.ts       mountStudio() — the editor UI (Animate + Assemble)
   save-plugin.ts  dev-only Vite endpoint (import directly, not via index)
 demo/           the reference integration — a procedural cast, no engine
 test/           node:test suite over the pure modules (`bun run test`)
 verify/         headless Playwright end-to-end (`bun run verify`)
-bridge/         ONLY meaningful inside the donor game's repository: the
-                extraction-parity tests against that game's real data.
-                Delete this directory when lifting the package into its
-                own repo — it imports from the donor codebase by design.
 ```
 
 Developing: `bun run dev` (the demo is the workbench), `bun run check`
@@ -141,8 +197,8 @@ drawBody(ctx, drive, pose);
 ### 2. The rig contract (`rig.ts`)
 
 Route each limb of your draw code through a helper — or your own helpers that
-call `recordBone` the same way (see how Candlemere's `kit.ts` threads its own
-`armSwing`/`legWalk`/`bodyDrive` through one bone-record sink):
+call `recordBone` the same way (a game with its own limb abstractions can
+thread them all through one bone-record sink):
 
 ```ts
 rootBone(ctx, pose, cx, cy, { dx, dy, rot }, () => {
@@ -198,12 +254,19 @@ plugins: [
     root: __dirname,
     file: 'src/data/anim/clips.ts',   // .json for plain JSON
     typesImport: `import type { BodyClips, MotionOverride } from './types';`,
+    skeletonsFile: 'src/data/anim/skeletons.json', // optional: assembled characters
   }),
 ],
 ```
 
 `apply: 'serve'` — it never ships. *Copy JSON* in the UI is the offline
 fallback. **Commit to seal the animation.**
+
+With `skeletonsFile` set, the studio loads assembled characters from the file
+on boot (GET) and autosaves edits back (POST) at `/__anim/skeletons` — set
+`adapter.skeletons = {}` (or `{ endpoint }` to customise the path) to opt the
+studio in. Without an endpoint, characters persist to localStorage and can be
+exported/imported as JSON from the Characters panel.
 
 ---
 
@@ -227,14 +290,22 @@ optional; an empty pose is the identity.
 
 ## Headless verification
 
-The studio exposes a driving hook (default `window.__ae`): `ready() count()
-labels() select(i) setClip(i) clips() state() setPose(on) bones()
-nudge(boneId, dAng) authoredKeys() save()`. `verify/verify.mjs` shows the
-pattern: boot in Playwright, nudge a bone, Save, reload, and assert the baked
-frame actually changed — then restore the clips file. Wire the same loop
-against your game and you have an end-to-end proof your data channel works.
+The studio exposes a driving hook (default `window.__ae`) covering the whole
+tool: the classic loop (`ready() count() labels() select(i) setClip(i)
+clips() state() setPose(on) bones() nudge(boneId, dAng) authoredKeys()
+save()`), modes + history (`mode() setMode(m) undo() redo()`), keyframe CRUD
+(`moveKey(from, to) copyKey() pasteKey()`), clip CRUD on assembled bodies
+(`addClip(name) renameClip(key, name) deleteClip(key) patchClip(key, {frames,
+per})`), and Assemble mode itself (`skeletons() newSkeleton(name)
+deleteSkeleton(id) addSkelBone(docId, opts) patchSkelBone(docId, boneId,
+patch) saveSkeletons()`). `verify/verify.mjs` shows the pattern: boot in
+Playwright, nudge a bone, Save, reload, and assert the baked frame actually
+changed; then assemble a character from a generated part, CRUD its clips and
+keys, and assert it survives a reload — then restore both files. Wire the
+same loop against your game and you have an end-to-end proof your data
+channel works.
 
-## Going further (patterns from the source game)
+## Going further (patterns from production use)
 
 - **Converted baseline** — capture the whole cast's procedural motion as
   absolute keys (bake each body once with recording on and store each
@@ -251,4 +322,4 @@ against your game and you have an end-to-end proof your data channel works.
 
 ---
 
-MIT. Extracted from *Candlemere: The Kingdom Is Grateful*.
+MIT.
