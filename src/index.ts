@@ -8,14 +8,23 @@
  *  - emit.ts      deterministic clips-file emitters (TS module / JSON)
  *  - timeline.ts  keyframe edit operations over the authored store
  *  - rig.ts       the bone contract: record sink + canvas FK/IK/root helpers
+ *  - skeleton.ts  assembled characters: the skeleton doc format + pure ops
+ *  - skeleton-render.ts  draw a skeleton doc / wrap it as a roster body
+ *  - assembly.ts  Assemble mode — the parts-to-rig editor pane
+ *  - history.ts   the shared undo/redo stack
  *  - adapter.ts   the host interface the studio drives your game through
- *  - studio.ts    mountStudio() — the editor UI itself
- *  - save-plugin.ts  a dev-only Vite endpoint that writes the clips file
+ *  - studio.ts    mountStudio() — the editor UI itself (Animate + Assemble)
+ *  - save-plugin.ts  a dev-only Vite endpoint that writes the clips +
+ *    skeletons files
  */
 export * from './types';
 export * from './sample';
 export * from './emit';
 export * from './timeline';
 export * from './rig';
+export * from './skeleton.ts';
+export * from './skeleton-render.ts';
+export * from './history.ts';
 export * from './adapter';
 export * from './studio';
+export * from './assembly.ts';

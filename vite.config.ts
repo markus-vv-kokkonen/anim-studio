@@ -17,6 +17,7 @@ export default defineConfig({
       file: 'demo/clips.ts',
       banner: DEMO_BANNER,
       typesImport: `import type { BodyClips, MotionOverride } from '../src/types';`,
+      skeletonsFile: 'demo/skeletons.json',
     }),
   ],
   server: {

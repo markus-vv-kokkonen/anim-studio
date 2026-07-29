@@ -28,6 +28,17 @@ and Save the edit back into the game's source as diffable, version-controlled
 data. That data **layers over** the procedural motion and is **inert until
 authored** — a body with no timeline renders exactly as before, byte-for-byte.
 
+The studio has two modes. **Animate** is the keyframe editor above — with full
+keyframe CRUD (set/clear, drag-to-move on the dope sheet, copy/paste, undo).
+**Assemble** builds characters from imported image parts: parts become bones,
+bones parent into a rig with configurable joints (free/hinge/fixed), and the
+assembled character joins the roster as a poseable body whose clips are fully
+user-defined (create/rename/retime/duplicate/delete). Assembled characters are
+`SkeletonDoc`s (skeleton.ts) persisted as one self-contained JSON unit each —
+rig + clips + timelines — via the save plugin's `skeletonsFile` (or
+localStorage); their timelines live under `sk:<id>` store keys and are **never
+written into the game's clips file**.
+
 Everything below exists to protect that promise. The hard part of this tool is
 not the API; it is a handful of invariants that keep authored data faithful and
 diffs clean. Break one and the failure is silent — the render looks fine in the
@@ -101,6 +112,9 @@ violate. Treat them as non-negotiable unless the user explicitly overrides.
    bone a unique `kind` (`fkBone(..., 'staffArm')` → the stable id `staffArm0`),
    so its identity stops depending on draw position — the default shared
    `arm`/`leg` kinds are the order-sensitive case (see `references/wiring.md`).
+   *Assembled* skeletons are the exception by design: their bone ids are
+   explicit unique names, and renaming a bone (`renameBone`) rewrites its
+   authored keys so data never detaches — never rename by hand-editing ids.
 
 5. **Authored tempo must never move a hazard beat.** An authored `duration`
    re-times **presentation** clips (idle/walk/hit) only — mark those `retimable`.
@@ -123,10 +137,17 @@ violate. Treat them as non-negotiable unless the user explicitly overrides.
 ## Pick your task
 
 - **Wiring anim-studio into a game** (implementing the rig, the adapter, the
-  sampler hookup, the Save endpoint) → read `references/wiring.md`.
+  sampler hookup, the Save endpoint, the skeletons endpoint) → read
+  `references/wiring.md`.
 - **Authoring or editing clip data** (in the studio, via the headless hook, with
   the timeline ops, or by hand) and understanding the stored format / sampling
-  in depth → read `references/data-format.md`.
+  in depth → read `references/data-format.md`. The skeleton-file format and how
+  assembled bodies use the pose channels are in its §8.
+- **Assembling characters** (parts → bones → joints → clips) — the workflow and
+  persistence model are summarised above and in README "Assemble mode"; the
+  document ops live in `src/skeleton.ts` (pure, node-testable), the pane in
+  `src/assembly.ts`, and the hook drives all of it headlessly
+  (`references/verification.md` §1).
 - **Proving it works or debugging a failure** (converted baseline, drift harness,
   headless verify, "my edit doesn't show / my diff exploded / a bone jumped") →
   read `references/verification.md`.
@@ -153,17 +174,29 @@ re-exported** from the index — import it directly in `vite.config.ts`.
   `prunedClips`, `countKeys`, `KEY_EPS` (`timeline.ts`).
 - Emit (deterministic): `emitClipsModule`, `emitClipsJson`, `clipsLiteral`,
   `stableClips` (`emit.ts`).
+- Assembled characters: the `SkeletonDoc` / `SkelBone` / `SkelClip` types and
+  pure ops (`addBone`, `removeBone`, `renameBone`, `reparentBone`, clip CRUD,
+  `worldTransforms`, `packSkeletons` / `unpackSkeletons`, `SKEL_PREFIX`) in
+  `skeleton.ts`; `skeletonBody` / `drawSkeleton` / `preloadSkeleton` in
+  `skeleton-render.ts`; the Assemble pane in `assembly.ts`; the shared
+  undo/redo `History` in `history.ts`.
 - Studio + adapter: `mountStudio(adapter, opts?)`, the `StudioAdapter` /
   `BakedBody` / `ClipDef` / `PlanFrame` / `BodyDesc` interfaces (`studio.ts`,
-  `adapter.ts`).
+  `adapter.ts`). The adapter's optional `skeletons: { endpoint? }` opts into
+  server-side persistence for assembled characters.
 - Save plugin (import directly): `animStudioSavePlugin(opts)` from
-  `anim-studio/src/save-plugin`.
+  `anim-studio/src/save-plugin` — plus optional `skeletonsFile` /
+  `skeletonsEndpoint` for the assembled-characters file.
 
 **Headless hook.** `mountStudio` exposes a driving API on `window.__ae` (rename
-via `opts.hook`, `false` disables): `ready() count() labels() select(i)
-setClip(i) clips() state() setPose(on) bones() nudge(boneId, dAng)
-authoredKeys() save()`. Use it to author or verify without a human — see
-`references/verification.md`.
+via `opts.hook`, `false` disables): the authoring loop (`ready() count()
+labels() select(i) setClip(i) clips() state() setPose(on) bones()
+nudge(boneId, dAng) authoredKeys() save()`), modes + history (`mode()
+setMode(m) undo() redo()`), keyframe CRUD (`moveKey(from,to) copyKey()
+pasteKey()`), clip CRUD on assembled bodies (`addClip renameClip deleteClip
+patchClip`), and Assemble mode (`skeletons() newSkeleton deleteSkeleton
+addSkelBone patchSkelBone saveSkeletons`). Use it to author or verify without
+a human — see `references/verification.md`.
 
 **Dev commands** (this repo; a host wires equivalents): `npm run dev` (the demo
 is the workbench at `/demo/`), `npm run check` (strict `tsc`), `npm test`
@@ -174,6 +207,4 @@ runner strips types from `.ts` directly).
 
 **`demo/` is the reference integration** — `demo/bodies.ts` implements the exact
 `StudioAdapter` shape a real game implements against its own pipeline; start
-there when wiring a new host. **`bridge/` is donor-repo-only** (it imports the
-source game's real data by design) — delete it when lifting the package into its
-own repo; never try to run it in the standalone package.
+there when wiring a new host.

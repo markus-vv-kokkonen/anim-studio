@@ -105,8 +105,8 @@ Supporting exports:
 
 A game that draws through its own abstraction (a Brush, a batched renderer) can
 pass the underlying `CanvasRenderingContext2D`, or write its own helpers that
-call `recordBone` with the same discipline — see how the source game threads its
-`armSwing` / `legWalk` / `bodyDrive` through one bone-record sink.
+call `recordBone` with the same discipline — thread every limb abstraction
+through one bone-record sink.
 
 ---
 
@@ -166,6 +166,14 @@ What each field must satisfy:
   Mark presentation clips (idle/walk/hit); leave attack clips unmarked (rule 5).
 - **`variants`** (`VariantDef`: `select` with options, or `toggle`) is the
   per-body loadout/facing/tier panel. Changing one re-bakes the body.
+- **`skeletons`** (optional) opts the studio into server-side persistence for
+  **assembled characters** (Assemble mode): `{}` uses the default
+  `/__anim/skeletons` endpoint, `{ endpoint }` customises it. Omit the field and
+  characters persist to localStorage instead (plus manual JSON export/import in
+  the Characters panel). Assembled bodies need nothing else from the adapter —
+  the studio bakes them itself and appends them to the roster under the
+  `assembled` group, with store keys prefixed `sk:` that Save **filters out** of
+  the game clips payload.
 
 `mountStudio(adapter, opts?)` returns and (by default) exposes the `StudioApi` on
 `window.__ae` — see `references/verification.md`. `opts.hook` renames it or
@@ -194,6 +202,9 @@ export default defineConfig({
       typesImport: `import type { BodyClips, MotionOverride } from './types';`,
       clipsExport: 'ANIM_CLIPS',        // default
       overridesExport: 'ANIM_OVERRIDES', // or false to omit
+      // Assembled characters (optional): the studio GETs this file at boot and
+      // POSTs autosaves to skeletonsEndpoint (default /__anim/skeletons).
+      skeletonsFile: 'src/data/anim/skeletons.json',
     }),
   ],
 });
@@ -235,5 +246,8 @@ export default defineConfig({
 - [ ] Presentation clips are `retimable`; combat clips are not.
 - [ ] Save plugin imported directly in `vite.config.ts`, `apply: 'serve'`, banner
       byte-matches the file, endpoint matches the adapter.
+- [ ] If Assemble mode should persist to git: `skeletonsFile` on the plugin +
+      `skeletons: {}` on the adapter; the skeletons JSON is generated — exclude
+      it from formatters like the clips file.
 - [ ] With everything wired: drag a joint, Save, reload, confirm the **baked**
       frame changed and nothing else did (`references/verification.md`).

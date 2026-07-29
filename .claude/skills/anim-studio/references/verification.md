@@ -9,9 +9,8 @@ otherwise. Contents:
 2. [Drift harness — prove the channel is inert](#2-drift-harness)
 3. [Converted baseline — a faithful, editable copy of today's motion](#3-converted-baseline)
 4. [Durable authored layer — surviving a baseline regen](#4-durable-authored-layer)
-5. [Extraction parity (donor repo only)](#5-extraction-parity)
-6. [Debugging playbook — symptom → cause → fix](#6-debugging-playbook)
-7. [Commands](#7-commands)
+5. [Debugging playbook — symptom → cause → fix](#5-debugging-playbook)
+6. [Commands](#6-commands)
 
 ---
 
@@ -27,7 +26,27 @@ select(i): Promise<void>    setClip(i): void          clips(): string[]
 state(): { name, group, clip, frame, frames, poseable }
 setPose(on): void           bones(): {id,kind,x,y}[]  nudge(boneId, dAng): void
 authoredKeys(): number      save(): Promise<boolean>
+
+// modes + history
+mode(): 'animate'|'assemble'    setMode(m): void
+undo(): string|null             redo(): string|null
+
+// keyframe CRUD (current body + clip; frame indices within the clip)
+moveKey(fromFrame, toFrame): boolean    copyKey(): boolean    pasteKey(): boolean
+
+// clip CRUD (assembled bodies only; `key` is the stable clip key)
+addClip(name): string|null              renameClip(key, name): boolean
+deleteClip(key): boolean                patchClip(key, {frames?, per?}): boolean
+
+// assembled characters (Assemble mode, drivable from either mode)
+skeletons(): {id,name,bones,clips}[]    newSkeleton(name): string
+deleteSkeleton(id): boolean             saveSkeletons(): Promise<boolean>
+addSkelBone(docId, {name?, parent?, x?, y?, rot?, len?, imgSrc?, imgW?, imgH?, …}): string|null
+patchSkelBone(docId, boneId, {x?, y?, rot?, sx?, sy?, len?, z?, joint?, name?, parent?}): boolean
 ```
+
+The API bypasses UI confirmation dialogs (`deleteSkeleton`, `deleteClip` act
+immediately) — the dialogs exist for humans.
 
 Note `bones()` returns the discovered joints only *after* `setPose(true)` has
 rendered a pose frame. There is no `setFrame` on the hook — to land on a specific
@@ -109,24 +128,15 @@ that polish as an **idempotent edit spec** — named deltas applied onto the
 freshly generated baseline keys — and re-apply it after every regeneration. That
 way "regenerate baseline" and "keep my hand-tuned hits" stop being in tension.
 
----
-
-## 5. Extraction parity (donor repo only)
-
-`bridge/parity.test.ts` proves the standalone package is a faithful
-generalization of the source game's animation channel: the package sampler and
-the game sampler agree across the whole shipped baseline; the package emitter
-writes **byte-identically** what the game's own Save endpoint writes; and
-round-tripping the real `clips.ts` is data-lossless and a fixed point. This is
-meaningful **only inside the donor game's repository** — it imports that game's
-real data by design. **Delete `bridge/` when lifting the package into its own
-repo**, and never try to run it in the standalone package (its imports won't
-resolve). When adapting the package to a *new* game, this file is the model for a
-parity test worth writing against that game's own sampler/emitter.
+When adapting the package to a game that already has its own sampler or
+emitter, write a **parity test** against them: assert the package sampler and
+the game sampler agree across the whole authored store, and that the package
+emitter writes byte-identically what the game's own Save path writes. That
+seam is where silent divergence hides.
 
 ---
 
-## 6. Debugging playbook
+## 5. Debugging playbook
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
@@ -142,15 +152,18 @@ parity test worth writing against that game's own sampler/emitter.
 
 ---
 
-## 7. Commands
+## 6. Commands
 
 In this repo (a host game wires equivalents into its own scripts):
 
 - `npm run dev` — the demo studio at `/demo/`, the authoring workbench.
-- `npm test` — `node:test` over the pure modules (`sample`, `emit`, `timeline`).
-- `npm run verify` — the full headless authoring loop in Chromium (§1);
-  non-destructive, restores `demo/clips.ts` afterward. Set `CHROMIUM_PATH` to a
-  Chrome binary to skip Playwright's managed download.
+- `npm test` — `node:test` over the pure modules (`sample`, `emit`, `timeline`,
+  `skeleton`).
+- `npm run verify` — the full headless loop in Chromium (§1): the authoring
+  loop, then Assemble mode (build a character, clip + key CRUD, persistence,
+  reload survival); non-destructive, restores `demo/clips.ts` and
+  `demo/skeletons.json` afterward. Set `CHROMIUM_PATH` to a Chrome binary to
+  skip Playwright's managed download.
 - `npm run check` — strict `tsc --noEmit`.
 - `npm run build` — bundle smoke check (there is no shipped dist; the package is
   consumed as source).

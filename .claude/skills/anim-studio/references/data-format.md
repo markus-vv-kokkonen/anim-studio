@@ -8,6 +8,7 @@ Contents:
 5. [Ways to author or edit](#5-ways-to-author-or-edit) — studio, hook, ops, by hand
 6. [Keeping edits diff-stable](#6-keeping-edits-diff-stable)
 7. [MotionOverride](#7-motionoverride)
+8. [Assembled characters (the skeleton file)](#8-assembled-characters)
 
 ---
 
@@ -231,3 +232,39 @@ absent override changes nothing. It ships in the format (the `ANIM_OVERRIDES`
 export) for hosts that want "make this body's whole motion a bit more/less"
 sliders; the base studio emits an empty map. Only wire it if the game reads it at
 bake time — otherwise leave `ANIM_OVERRIDES` empty and untouched.
+
+---
+
+## 8. Assembled characters
+
+Assemble mode builds characters as `SkeletonDoc`s (`src/skeleton.ts` — pure,
+node-testable). One doc is one self-contained unit:
+
+```
+SkeletonFile: { version: 1, skeletons: { <docId>: SkeletonDoc } }
+SkeletonDoc:  { id, name, fw, fh, bones: SkelBone[], clips: SkelClip[], timelines: BodyClips }
+SkelBone:     { id, parent, x, y, rot, sx, sy, len, z, joint, img? }
+SkelClip:     { key, name, frames, per }         // key stable, name renamable
+```
+
+- **Bone ids are explicit unique names** (unlike procedural bodies' draw-order
+  ids). `renameBone` rewrites the doc's timelines so authored keys follow the
+  bone; `removeBone` strips the subtree's keys. Never rename by hand-editing.
+- **`timelines` is the SAME object** the studio injects into the live clip
+  store at `sk:<docId>` — animate-mode edits land in the doc and persist with
+  it. `sk:*` keys are **filtered out of the game clips Save**; they belong to
+  the skeleton file only.
+- **Skeleton bones animate through the relative channels**: `dAng` rotates
+  about the joint — clamped by the joint config (`free`/`hinge` min–max/`fixed`
+  welds) — and `ikDx/ikDy` translate in parent space. Bind pose (position,
+  rotation, scale) is assembly data, not animation data; the absolute channels
+  are unused.
+- **Clip keys are stable across renames** (`walk` stays `walk` when the display
+  name becomes "strut"), so timelines never detach; `frames` × `per` (ms) is
+  the sampling grid, `t = i/(frames-1)`.
+- **Serialisation** (`packSkeletons` / `unpackSkeletons`) is canonical like the
+  clips emitter — deep-sorted keys, bones sorted by draw order, empty timelines
+  pruned, trailing newline — and `unpackSkeletons` is defensive (defaults
+  filled, unknown parents cleared, ≥1 clip guaranteed). Attachment images are
+  embedded data URIs (imports are capped at 512px on the long edge). The file
+  is generated: exclude it from formatters like the clips file.

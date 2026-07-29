@@ -2,8 +2,10 @@
  * Headless end-to-end verify for the studio: boots the demo in Chromium,
  * drives the __ae hook through the WHOLE authoring loop — view a body, pose a
  * bone, keyframe, Save to demo/clips.ts, reload, and prove the authored edit
- * replays through the bake path (the baked frame actually changes) — then
- * restores the clips file. Non-destructive.
+ * replays through the bake path (the baked frame actually changes) — then does
+ * the same for Assemble mode: build a character from a generated part, CRUD
+ * its clips and keys, persist demo/skeletons.json, and prove it survives a
+ * reload. Both files are restored afterwards. Non-destructive.
  *
  *   npm run verify              # spawns its own vite dev server
  *
@@ -14,9 +16,12 @@ import fs from 'node:fs';
 
 const PKG = new URL('..', import.meta.url).pathname;
 const CLIPS = PKG + 'demo/clips.ts';
+const SKELS = PKG + 'demo/skeletons.json';
 const SHOT = new URL('./verify-shot.png', import.meta.url).pathname;
+const SHOT2 = new URL('./verify-shot-assemble.png', import.meta.url).pathname;
 
 const snapshot = fs.readFileSync(CLIPS, 'utf8');
+const skelSnapshot = fs.readFileSync(SKELS, 'utf8');
 const { createServer } = await import('vite');
 const server = await createServer({
   configFile: PKG + 'vite.config.ts',
@@ -104,14 +109,99 @@ try {
   // …and only where authored: an unkeyed frame elsewhere is untouched by design
   await page.screenshot({ path: SHOT });
 
+  // --- assemble mode: build a character from a generated part ----------------
+  out.skel = await page.evaluate(() => {
+    const api = window.__ae;
+    api.setMode('assemble');
+    const id = api.newSkeleton('Test Hero');
+    const c = document.createElement('canvas');
+    c.width = 12;
+    c.height = 8;
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#a7f070';
+    cx.fillRect(0, 0, 12, 8);
+    const src = c.toDataURL('image/png');
+    const arm = api.addSkelBone(id, { name: 'arm', x: 10, y: -6, imgSrc: src, imgW: 12, imgH: 8 });
+    const hand = api.addSkelBone(id, { name: 'hand', parent: arm, x: 8, imgSrc: src, imgW: 12, imgH: 8 });
+    api.patchSkelBone(id, hand, { rot: 0.4, sx: 1.5, sy: 1.5 });
+    api.patchSkelBone(id, arm, { joint: { type: 'hinge', min: -1, max: 1 } });
+    return { id, arm, hand, list: api.skeletons(), mode: api.mode() };
+  });
+  if (out.skel.mode !== 'assemble') fail('setMode(assemble) did not switch');
+  if (out.skel.list.length !== 1 || out.skel.list[0].bones !== 3) fail(`skeleton wrong: ${JSON.stringify(out.skel.list)}`);
+  await page.screenshot({ path: SHOT2 });
+
+  // --- the assembled body joins the roster and animates ----------------------
+  await page.evaluate(() => window.__ae.setMode('animate'));
+  const labels2 = await page.evaluate(() => window.__ae.labels());
+  if (!labels2.includes('Test Hero')) fail(`assembled body missing from roster: ${labels2}`);
+  await page.evaluate((i) => window.__ae.select(i), labels2.indexOf('Test Hero'));
+  await page.waitForFunction(() => window.__ae.state().name === 'Test Hero');
+  out.skelState = await page.evaluate(() => window.__ae.state());
+  if (!out.skelState.poseable) fail('assembled body should be poseable');
+
+  // clip CRUD: add → rename → retime; key CRUD: nudge → move → copy/paste
+  out.clipCrud = await page.evaluate(() => {
+    const api = window.__ae;
+    const key = api.addClip('walk');
+    const renamed = api.renameClip(key, 'strut');
+    const patched = api.patchClip(key, { frames: 6, per: 90 });
+    api.setClip(api.clips().indexOf('strut'));
+    return { key, renamed, patched, clips: api.clips(), frames: api.state().frames };
+  });
+  if (!out.clipCrud.key || !out.clipCrud.renamed || !out.clipCrud.patched) fail(`clip CRUD failed: ${JSON.stringify(out.clipCrud)}`);
+  if (!out.clipCrud.clips.includes('strut') || out.clipCrud.frames !== 6) fail(`clip rename/retime wrong: ${JSON.stringify(out.clipCrud)}`);
+
+  await page.evaluate(() => window.__ae.setPose(true));
+  out.skelBones = await page.evaluate(() => window.__ae.bones());
+  if (out.skelBones.length !== 3 || !out.skelBones.some((b) => b.kind === 'root')) fail(`skeleton bones wrong: ${JSON.stringify(out.skelBones)}`);
+  out.keyCrud = await page.evaluate(() => {
+    const api = window.__ae;
+    const scrub = document.querySelector('[data-as="scrub"]');
+    const goto = (f) => {
+      scrub.value = String(f);
+      scrub.dispatchEvent(new Event('input'));
+    };
+    goto(0);
+    api.nudge('arm', 0.6); // keys frame 0
+    const moved = api.moveKey(0, 3);
+    goto(3);
+    const copyAtNew = api.copyKey(); // true only if the key really moved here
+    goto(0);
+    const copyAtOld = api.copyKey(); // false — the key left frame 0
+    goto(5);
+    const pasted = api.pasteKey();
+    return { moved, copyAtNew, copyAtOld, pasted, keys: api.authoredKeys() };
+  });
+  if (!out.keyCrud.moved || !out.keyCrud.copyAtNew || out.keyCrud.copyAtOld || !out.keyCrud.pasted) fail(`key CRUD wrong: ${JSON.stringify(out.keyCrud)}`);
+
+  // --- persistence: skeleton file written; the game clips file stays clean ---
+  out.skelSaved = await page.evaluate(() => window.__ae.saveSkeletons());
+  if (!out.skelSaved) fail('saveSkeletons failed');
+  const skelWritten = fs.readFileSync(SKELS, 'utf8');
+  if (!skelWritten.includes('"test_hero"') || !skelWritten.includes('"strut"') || !skelWritten.includes('"arm"')) fail('skeletons.json missing the assembled character');
+  await page.evaluate(() => window.__ae.save());
+  if (fs.readFileSync(CLIPS, 'utf8').includes('sk:')) fail('assembled sk:* timelines leaked into the game clips file');
+
+  // --- reload: the assembled character and its keys survive ------------------
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => window.__ae && window.__ae.ready(), null, { timeout: 20000 });
+  out.skelAfterReload = await page.evaluate(() => window.__ae.skeletons());
+  if (out.skelAfterReload.length !== 1 || out.skelAfterReload[0].bones !== 3 || out.skelAfterReload[0].clips !== 2) {
+    fail(`skeleton did not survive reload: ${JSON.stringify(out.skelAfterReload)}`);
+  }
+  const deleted = await page.evaluate(() => window.__ae.deleteSkeleton('test_hero'));
+  if (!deleted) fail('deleteSkeleton failed');
+
   out.errors = errors;
   out.notFound = notFound.filter((p) => p !== '/favicon.ico'); // favicon 404 is benign
   if (errors.length) fail(`console errors: ${errors.join(' | ')}`);
   if (out.notFound.length) fail(`404s: ${out.notFound.join(' ')}`);
-  console.log(JSON.stringify({ ...out, bones: out.bones.length }, null, 2));
+  console.log(JSON.stringify({ ...out, bones: out.bones.length, skelBones: out.skelBones.length }, null, 2));
   if (process.exitCode !== 1) console.log('✓ studio verify passed');
 } finally {
-  fs.writeFileSync(CLIPS, snapshot); // non-destructive: restore the demo data
   await browser.close();
   await server.close();
+  fs.writeFileSync(CLIPS, snapshot); // non-destructive: restore the demo data
+  fs.writeFileSync(SKELS, skelSnapshot);
 }
