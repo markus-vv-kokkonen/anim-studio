@@ -16,12 +16,17 @@ version-controlled data that both you and an agent can iterate on.
 The studio has two modes, Spine-style:
 
 - **Animate** — the keyframe editor above, over every body in the roster.
-  The timeline is a live filmstrip: every frame cell shows the character as
-  it renders at that frame, keyed frames wear a ◆ badge, and the amber line
-  marks the interpolated tween between keys. Key a frame straight from the
-  strip (hover ◆ / double-click), drag a key to retime it or onto another
-  key to swap the two, right-click for copy/paste/duplicate — every edit
-  undoable.
+  Keys are the animation; everything between them is interpolation. The
+  **keys timeline** holds ◆ diamonds at their true times — spacing can be
+  non-uniform — drag one to retime it (magnetic frame snap, Alt for free),
+  double-click anywhere to add a key, click a diamond to select it (ease,
+  clear, copy/paste then target that exact key), right-click for actions,
+  and edit the whole clip's duration inline. Below it, the **frames
+  filmstrip** shows the sampled grid the clip plays/exports at: every cell
+  renders the real character, on-frame keys wear a ◆ badge, the amber line
+  marks the tween, and assembled clips grow via the ＋ cell. Assembled
+  bodies even play back continuously — sampling the keys at the exact
+  elapsed time. Every edit is undoable.
 - **Assemble** — import pictures, attach them as bones, drag/rotate/scale
   them into a rig, parent bones into a hierarchy, and configure each joint
   (free / hinge with limits / welded). Assembled characters join the roster
@@ -96,7 +101,9 @@ Everything needed to build a cut-out character and hand it a skeleton rig:
 
 - **Parts** — import images (file picker or drag-drop onto the canvas). Each
   import is capped at 512px on the long edge and embedded as a data URI, so a
-  character document is fully self-contained.
+  character document is fully self-contained. The bin itself persists with
+  the skeletons file, so imported parts are remembered across sessions
+  (hover a part for ✕ to remove it from the bin).
 - **Bones** — a part attaches as a new bone under the selected bone; empty
   bones (`+ bone`) give the rig structure. Select on canvas or in the
   skeleton tree; move / rotate / scale with the gizmo or the inspector's

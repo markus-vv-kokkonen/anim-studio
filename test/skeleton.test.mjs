@@ -163,7 +163,7 @@ test('pack → unpack round-trips a doc (bones by z, empty timelines pruned)', (
   const text = packSkeletons([doc]);
   assert.ok(text.endsWith('\n'));
   assert.equal(text, packSkeletons([doc]), 'pack is deterministic');
-  const [back] = unpackSkeletons(text);
+  const [back] = unpackSkeletons(text).skeletons;
   assert.equal(back.id, 'hero');
   assert.equal(back.name, 'Hero');
   assert.equal(back.fw, 128);
@@ -177,9 +177,20 @@ test('unpack is defensive: bad parents cleared, missing clips defaulted', () => 
   const [doc] = unpackSkeletons(JSON.stringify({
     version: 1,
     skeletons: { junk: { bones: [{ id: 'a', parent: 'ghost' }], clips: [] } },
-  }));
+  })).skeletons;
   assert.equal(doc.name, 'junk');
   assert.equal(boneById(doc, 'a').parent, null);
   assert.equal(doc.clips.length, 1);
   assert.equal(descendants(doc, 'a').size, 0);
+});
+
+test('the parts bin rides in the skeleton file and round-trips', () => {
+  const parts = [{ name: 'wing', src: 'data:img', w: 12, h: 8 }];
+  const text = packSkeletons([], parts);
+  const back = unpackSkeletons(text);
+  assert.deepEqual(back.parts, parts);
+  assert.deepEqual(back.skeletons, []);
+  // absent parts / junk entries are tolerated
+  assert.deepEqual(unpackSkeletons('{"version":1,"skeletons":{}}').parts, []);
+  assert.deepEqual(unpackSkeletons(JSON.stringify({ parts: [{ nope: 1 }] })).parts, []);
 });

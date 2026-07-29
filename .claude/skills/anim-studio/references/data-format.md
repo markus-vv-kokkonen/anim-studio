@@ -259,6 +259,11 @@ SkelClip:     { key, name, frames, per }         // key stable, name renamable
   welds) — and `ikDx/ikDy` translate in parent space. Bind pose (position,
   rotation, scale) is assembly data, not animation data; the absolute channels
   are unused.
+- **Keys may sit at any `t`, not just on frames** — the studio's timeline
+  authors them freely (non-uniform spacing), the sampler interpolates them
+  into whatever grid samples them, and the studio plays assembled bodies
+  continuously. The file also carries the shared **parts bin** (`parts:
+  [{name, src, w, h}]`) so imports survive reloads.
 - **Clip keys are stable across renames** (`walk` stays `walk` when the display
   name becomes "strut"), so timelines never detach; `frames` × `per` (ms) is
   the sampling grid, `t = i/(frames-1)`. Changing a clip's frame count via

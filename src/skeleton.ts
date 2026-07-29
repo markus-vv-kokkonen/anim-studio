@@ -137,10 +137,21 @@ export interface SkeletonDoc {
   timelines: BodyClips;
 }
 
-/** The persisted file: every assembled character, keyed by doc id. */
+/** An imported picture in the parts bin (kept in the file so the bin
+ *  survives reloads — attached copies live on the bones themselves). */
+export interface SkelPart {
+  name: string;
+  src: string;
+  w: number;
+  h: number;
+}
+
+/** The persisted file: every assembled character (keyed by doc id) plus the
+ *  shared parts bin. */
 export interface SkeletonFile {
   version: 1;
   skeletons: Record<string, SkeletonDoc>;
+  parts?: SkelPart[];
 }
 
 /** Store-key prefix separating assembled bodies from the host game's bodies —
@@ -473,9 +484,10 @@ export function restoreDoc(doc: SkeletonDoc, snap: string): void {
 // (de)serialisation — canonical and diff-stable, like emit.ts
 // ---------------------------------------------------------------------------
 
-/** Serialise every doc into the skeleton-file JSON: deep-sorted keys, bones
- *  sorted by id, timelines pruned of empties — a one-bone edit diffs small. */
-export function packSkeletons(docs: SkeletonDoc[]): string {
+/** Serialise every doc (and the parts bin) into the skeleton-file JSON:
+ *  deep-sorted keys, bones sorted by id, timelines pruned of empties — a
+ *  one-bone edit diffs small. */
+export function packSkeletons(docs: SkeletonDoc[], parts: SkelPart[] = []): string {
   const skeletons: Record<string, unknown> = {};
   for (const doc of docs) {
     skeletons[doc.id] = {
@@ -485,7 +497,7 @@ export function packSkeletons(docs: SkeletonDoc[]): string {
       timelines: prunedClips({ [doc.id]: doc.timelines })[doc.id] ?? {},
     };
   }
-  return JSON.stringify(stableClips({ version: 1, skeletons }), null, 0) + '\n';
+  return JSON.stringify(stableClips({ version: 1, skeletons, parts }), null, 0) + '\n';
 }
 
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d);
@@ -516,7 +528,7 @@ function normaliseBone(raw: Record<string, unknown>, i: number): SkelBone {
 /** Parse a skeleton file defensively: defaults are filled, unknown parents are
  *  cleared, and a doc always ends up with ≥1 clip — so a hand-edited file
  *  loads rather than wedging the studio. Throws only on invalid JSON. */
-export function unpackSkeletons(text: string): SkeletonDoc[] {
+export function unpackSkeletons(text: string): { skeletons: SkeletonDoc[]; parts: SkelPart[] } {
   const root = JSON.parse(text || '{}') as Record<string, unknown>;
   const skeletons = (root.skeletons ?? {}) as Record<string, Record<string, unknown>>;
   const docs: SkeletonDoc[] = [];
@@ -542,5 +554,9 @@ export function unpackSkeletons(text: string): SkeletonDoc[] {
     if (!doc.clips.length) addClip(doc, 'idle');
     docs.push(doc);
   }
-  return docs;
+  const partsRaw = Array.isArray(root.parts) ? (root.parts as Record<string, unknown>[]) : [];
+  const parts: SkelPart[] = partsRaw
+    .filter((p) => p && typeof p.src === 'string')
+    .map((p) => ({ name: str(p.name, 'part'), src: p.src as string, w: num(p.w, 1), h: num(p.h, 1) }));
+  return { skeletons: docs, parts };
 }

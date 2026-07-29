@@ -9,7 +9,7 @@
  * both modes feel like one tool.
  */
 import type { History } from './history.ts';
-import type { SkeletonDoc, SkelBone, Mat2D } from './skeleton.ts';
+import type { SkeletonDoc, SkelBone, SkelPart, Mat2D } from './skeleton.ts';
 import {
   addBone, removeBone, renameBone, reparentBone, boneById, bonesByZ, moveBoneZ,
   worldTransforms, matApply, matInvert, matMul, uniqueSkelId, createSkeleton, descendants,
@@ -25,6 +25,11 @@ export interface AssemblyDeps {
   root: HTMLElement;
   /** The live document list (owned by the studio, mutated here). */
   docs: SkeletonDoc[];
+  /** The persistent parts bin (loaded with — and saved into — the skeleton
+   *  file, so imports survive reloads). */
+  parts: SkelPart[];
+  /** The bin changed (imports, removals) — persist it. */
+  onPartsChanged(): void;
   history: History;
   toast(msg: string): void;
   confirmBox(msg: string): Promise<boolean>;
@@ -49,14 +54,6 @@ export interface AssemblyPane {
   deleteDoc(id: string): Promise<boolean>;
   /** Keydown routed from the studio while Assemble mode is active. */
   handleKey(e: KeyboardEvent): boolean;
-}
-
-/** An imported picture waiting in the parts bin. */
-interface Part {
-  name: string;
-  src: string;
-  w: number;
-  h: number;
 }
 
 // gizmo geometry (screen px)
@@ -114,7 +111,7 @@ const loadImage = (src: string): Promise<HTMLImageElement> =>
 
 /** File → part, re-encoding down to {@link PART_MAX} on the long edge so a
  *  photo-sized import can't bloat the doc. */
-async function fileToPart(file: File): Promise<Part> {
+async function fileToPart(file: File): Promise<SkelPart> {
   let src = await readAsDataURL(file);
   let img = await loadImage(src);
   let w = img.naturalWidth;
@@ -225,7 +222,7 @@ export function mountAssembly(deps: AssemblyDeps): AssemblyPane {
   // ---- state ---------------------------------------------------------------
   let doc: SkeletonDoc | null = null;
   let selBone: string | null = null;
-  const parts: Part[] = [];
+  const parts = deps.parts;
   const view = { ox: 0, oy: 0, scale: 2 };
   let spaceHeld = false;
 
@@ -630,13 +627,14 @@ export function mountAssembly(deps: AssemblyDeps): AssemblyPane {
         deps.toast(`couldn't read ${f.name}`);
       }
     }
+    deps.onPartsChanged();
     renderParts();
     if (!doc) deps.toast(`imported ${files.length} part${files.length === 1 ? '' : 's'} — create a character to use them`);
   }
 
   /** Attach a part as a NEW bone under the selected bone (world pos given or
    *  centre-frame), named after the part. */
-  function attachPart(part: Part, atWorld?: [number, number]): void {
+  function attachPart(part: SkelPart, atWorld?: [number, number]): void {
     if (!doc) return;
     const d = doc;
     withDoc('attach part', () => {
@@ -664,7 +662,7 @@ export function mountAssembly(deps: AssemblyDeps): AssemblyPane {
       partGrid.appendChild(el('div', 'as-note', 'no parts imported yet'));
       return;
     }
-    for (const part of parts) {
+    parts.forEach((part, pi) => {
       const cell = el('div', 'asm-part');
       cell.title = `${part.name} · ${part.w}×${part.h} — click to attach under the selected bone`;
       const img = el('img');
@@ -672,6 +670,15 @@ export function mountAssembly(deps: AssemblyDeps): AssemblyPane {
       img.alt = part.name;
       cell.appendChild(img);
       cell.appendChild(el('div', 'asm-partname', part.name));
+      const rm = el('button', 'asm-partrm', '✕');
+      rm.title = 'remove from the bin (bones keep their copies)';
+      rm.onclick = (ev) => {
+        ev.stopPropagation();
+        parts.splice(pi, 1);
+        deps.onPartsChanged();
+        renderParts();
+      };
+      cell.appendChild(rm);
       cell.onclick = () => {
         if (!doc) {
           deps.toast('create a character first');
@@ -680,7 +687,7 @@ export function mountAssembly(deps: AssemblyDeps): AssemblyPane {
         attachPart(part);
       };
       partGrid.appendChild(cell);
-    }
+    });
   }
 
   // ---- characters ----------------------------------------------------------
@@ -1018,10 +1025,10 @@ export function mountAssembly(deps: AssemblyDeps): AssemblyPane {
   };
   $<HTMLButtonElement>('exportChars').onclick = () => {
     const a = el('a');
-    a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(packSkeletons(docs));
+    a.href = 'data:application/json;charset=utf-8,' + encodeURIComponent(packSkeletons(docs, parts));
     a.download = 'skeletons.json';
     a.click();
-    deps.toast(`exported ${docs.length} character${docs.length === 1 ? '' : 's'}`);
+    deps.toast(`exported ${docs.length} character${docs.length === 1 ? '' : 's'} + ${parts.length} part${parts.length === 1 ? '' : 's'}`);
   };
   const charsInput = el('input');
   charsInput.type = 'file';
@@ -1037,7 +1044,7 @@ export function mountAssembly(deps: AssemblyDeps): AssemblyPane {
         const loaded = unpackSkeletons(text);
         let added = 0;
         let replaced = 0;
-        for (const d of loaded) {
+        for (const d of loaded.skeletons) {
           const existing = docs.find((x) => x.id === d.id);
           if (existing) {
             restoreDoc(existing, JSON.stringify(d));
@@ -1049,6 +1056,8 @@ export function mountAssembly(deps: AssemblyDeps): AssemblyPane {
             added++;
           }
         }
+        for (const p of loaded.parts) if (!parts.some((x) => x.src === p.src)) parts.push(p);
+        deps.onPartsChanged();
         deps.onDocsListChanged();
         for (const d of docs) void preloadSkeleton(d);
         refresh();
