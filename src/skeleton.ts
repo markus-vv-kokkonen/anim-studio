@@ -415,10 +415,36 @@ export function duplicateClip(doc: SkeletonDoc, key: string): SkelClip | null {
 const clampFrames = (n: number): number => Math.max(1, Math.min(120, Math.round(n) || 1));
 const clampPer = (n: number): number => Math.max(16, Math.min(2000, Math.round(n) || 120));
 
+/** Snap a timeline's keys onto a new frame grid (t = k/(n-1)) so every key
+ *  stays ON a frame — an off-grid key would still sample but could no longer
+ *  be seen or edited on the filmstrip. Keys that collide on the same slot
+ *  keep the earliest. */
+function snapKeysToGrid(tl: ClipTimelineLike | undefined, frames: number): void {
+  if (!tl) return;
+  const snap = (t: number): number => (frames <= 1 ? 0 : Math.round(t * (frames - 1)) / (frames - 1));
+  const seen = new Set<number>();
+  const out: typeof tl.keys = [];
+  for (const k of [...tl.keys].sort((a, b) => a.t - b.t)) {
+    const t = snap(k.t);
+    if (seen.has(t)) continue;
+    seen.add(t);
+    k.t = t;
+    out.push(k);
+  }
+  tl.keys = out;
+}
+type ClipTimelineLike = BodyClips[string];
+
 export function patchClip(doc: SkeletonDoc, key: string, patch: { frames?: number; per?: number }): boolean {
   const c = doc.clips.find((x) => x.key === key);
   if (!c) return false;
-  if (patch.frames !== undefined) c.frames = clampFrames(patch.frames);
+  if (patch.frames !== undefined) {
+    const next = clampFrames(patch.frames);
+    if (next !== c.frames) {
+      c.frames = next;
+      snapKeysToGrid(doc.timelines[key], next);
+    }
+  }
   if (patch.per !== undefined) c.per = clampPer(patch.per);
   return true;
 }

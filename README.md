@@ -17,8 +17,11 @@ The studio has two modes, Spine-style:
 
 - **Animate** — the keyframe editor above, over every body in the roster.
   The timeline is a live filmstrip: every frame cell shows the character as
-  it renders at that frame, keyed frames wear a ◆ badge, keys drag between
-  frames, copy/paste works, and every edit is undoable.
+  it renders at that frame, keyed frames wear a ◆ badge, and the amber line
+  marks the interpolated tween between keys. Key a frame straight from the
+  strip (hover ◆ / double-click), drag a key to retime it or onto another
+  key to swap the two, right-click for copy/paste/duplicate — every edit
+  undoable.
 - **Assemble** — import pictures, attach them as bones, drag/rotate/scale
   them into a rig, parent bones into a hierarchy, and configure each joint
   (free / hinge with limits / welded). Assembled characters join the roster

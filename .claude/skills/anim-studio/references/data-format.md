@@ -261,7 +261,9 @@ SkelClip:     { key, name, frames, per }         // key stable, name renamable
   are unused.
 - **Clip keys are stable across renames** (`walk` stays `walk` when the display
   name becomes "strut"), so timelines never detach; `frames` × `per` (ms) is
-  the sampling grid, `t = i/(frames-1)`.
+  the sampling grid, `t = i/(frames-1)`. Changing a clip's frame count via
+  `patchClip` **snaps existing keys to the new grid** (nearest frame; colliding
+  keys keep the earliest) so every key stays on-frame and strip-editable.
 - **Serialisation** (`packSkeletons` / `unpackSkeletons`) is canonical like the
   clips emitter — deep-sorted keys, bones sorted by draw order, empty timelines
   pruned, trailing newline — and `unpackSkeletons` is defensive (defaults

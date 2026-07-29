@@ -140,6 +140,20 @@ test('clip CRUD: add/rename/patch/duplicate/remove, last clip protected', () => 
   assert.equal(removeClip(doc, 'idle'), false); // never remove the last clip
 });
 
+test('patchClip frame-count change snaps keys to the new grid', () => {
+  const doc = createSkeleton('c', 'c'); // idle: 8 frames
+  doc.timelines.idle = { keys: [
+    { t: 0, pose: { root: { dAng: 1 } } },
+    { t: 3 / 7, pose: { root: { dAng: 2 } } },
+    { t: 1, pose: { root: { dAng: 3 } } },
+  ] };
+  patchClip(doc, 'idle', { frames: 5 }); // grid denominators 7 → 4
+  assert.deepEqual(doc.timelines.idle.keys.map((k) => k.t), [0, 0.5, 1]);
+  patchClip(doc, 'idle', { frames: 2 }); // collisions keep the earliest key
+  assert.deepEqual(doc.timelines.idle.keys.map((k) => k.pose.root.dAng), [1, 2]);
+  assert.deepEqual(doc.timelines.idle.keys.map((k) => k.t), [0, 1]);
+});
+
 test('pack → unpack round-trips a doc (bones by z, empty timelines pruned)', () => {
   const doc = createSkeleton('hero', 'Hero', 128, 160);
   const arm = addBone(doc, { name: 'arm', x: 3.5, rot: 0.25, img: { src: 'data:x', w: 8, h: 8, ax: 0, ay: 4, rot: 0, sx: 1, sy: 1 } });
