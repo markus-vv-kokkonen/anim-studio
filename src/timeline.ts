@@ -41,14 +41,14 @@ export function clearKeyAt(tl: ClipTimeline, t: number): void {
 }
 
 /** The store pruned for persisting: keep a timeline that carries keys OR an
- *  authored duration (a duration-only timeline must survive Save), drop empty
- *  timelines and empty bodies. Returns a NEW object; the live store keeps its
- *  in-progress empties. */
+ *  authored duration OR a variation config (each must survive Save on its
+ *  own), drop empty timelines and empty bodies. Returns a NEW object; the live
+ *  store keeps its in-progress empties. */
 export function prunedClips(store: ClipStore): ClipStore {
   const clips: ClipStore = {};
   for (const [id, bc] of Object.entries(store)) {
     const ne: BodyClips = {};
-    for (const [cid, tl] of Object.entries(bc)) if (tl.keys.length || tl.duration) ne[cid] = tl;
+    for (const [cid, tl] of Object.entries(bc)) if (tl.keys.length || tl.duration || tl.variation) ne[cid] = tl;
     if (Object.keys(ne).length) clips[id] = ne;
   }
   return clips;

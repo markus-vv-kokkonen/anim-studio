@@ -149,6 +149,7 @@ Everything needed to build a cut-out character and hand it a skeleton rig:
 src/            the package — pure TS source, consumed via your bundler
   types.ts        the stored format (poses, keyframes, timelines)
   sample.ts       sample a timeline at a clip-time (game + studio share it)
+  variation.ts    optional deterministic per-cycle randomisation
   emit.ts         deterministic clips-file emitters (TS module / JSON)
   timeline.ts     keyframe edit operations over the authored store
   rig.ts          the bone contract: record sink + canvas FK/IK/root helpers
@@ -289,6 +290,46 @@ studio in. Without an endpoint, characters persist to localStorage and can be
 exported/imported as JSON from the Characters panel.
 
 ---
+
+## Random variation (optional)
+
+Repeating animations read as robotic when every loop is identical. Any clip
+can carry an optional **variation** config — set it in the Variation panel
+(amplitude / speed / phase, all `0` by default):
+
+| Amount | Effect |
+|--------|--------|
+| **amplitude ±%** | how far the motion travels — `15` means a swing lands anywhere from 85% (falls short) to 115% (overshoots), drawn **per bone** so limbs vary independently |
+| **speed ±%** | per-loop tempo jitter |
+| **phase ±%** | per-loop start offset, so copies of a body drift out of lockstep |
+| `bones` | per-bone weights (`{ root: 0.2 }` steadies the body, `0` pins a bone) |
+
+Three properties make it safe to ship:
+
+1. **Sampling-time, never baked.** Authored keys stay exact; variation is
+   applied when a pose is sampled, so turning it off restores the authored
+   motion byte-for-byte (and an unconfigured clip is untouched — inert).
+2. **Deterministic.** Values come from a hash of `(seed, cycle, bone)`, not
+   `Math.random()`, so the studio preview, your bake, and the game agree, and
+   any glitch reproduces.
+3. **Per cycle, not per frame.** One draw is held for a whole loop, so a
+   playthrough stays smooth; a clip that starts and ends at rest still loops
+   seamlessly (scaling a zero-magnitude pose changes nothing).
+
+In your game, swap the sampler:
+
+```ts
+import { samplePoseVaried } from 'anim-studio';
+
+const cycle = Math.floor(elapsedMs / clipMs);
+const pose  = samplePoseVaried(ANIM_CLIPS[bodyId]?.[clip], t, cycle, entityId);
+```
+
+`entityId` is a per-instance seed so two on-screen copies of the same body
+vary differently. For tempo, read `variationFor(cfg, cycle, entityId).speed`
+and multiply your clock. The studio previews variation **only while playing**
+— posing and scrubbing always show the exact authored pose, so a drag edits
+what you see.
 
 ## The stored format
 
