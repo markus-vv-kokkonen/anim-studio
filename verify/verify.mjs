@@ -128,7 +128,8 @@ try {
     return { id, arm, hand, list: api.skeletons(), mode: api.mode() };
   });
   if (out.skel.mode !== 'assemble') fail('setMode(assemble) did not switch');
-  if (out.skel.list.length !== 1 || out.skel.list[0].bones !== 3) fail(`skeleton wrong: ${JSON.stringify(out.skel.list)}`);
+  const hero = out.skel.list.find((s) => s.id === 'test_hero');
+  if (!hero || hero.bones !== 3) fail(`skeleton wrong: ${JSON.stringify(out.skel.list)}`);
   await page.screenshot({ path: SHOT2 });
 
   // --- the assembled body joins the roster and animates ----------------------
@@ -187,9 +188,12 @@ try {
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(() => window.__ae && window.__ae.ready(), null, { timeout: 20000 });
   out.skelAfterReload = await page.evaluate(() => window.__ae.skeletons());
-  if (out.skelAfterReload.length !== 1 || out.skelAfterReload[0].bones !== 3 || out.skelAfterReload[0].clips !== 2) {
+  const heroAfter = out.skelAfterReload.find((s) => s.id === 'test_hero');
+  if (!heroAfter || heroAfter.bones !== 3 || heroAfter.clips !== 2) {
     fail(`skeleton did not survive reload: ${JSON.stringify(out.skelAfterReload)}`);
   }
+  // the seeded, fully-editable demo character ships in demo/skeletons.json
+  if (!out.skelAfterReload.some((s) => s.id === 'scout_kit')) fail('seeded scout kit missing from the demo data');
   const deleted = await page.evaluate(() => window.__ae.deleteSkeleton('test_hero'));
   if (!deleted) fail('deleteSkeleton failed');
 

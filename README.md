@@ -17,16 +17,17 @@ The studio has two modes, Spine-style:
 
 - **Animate** — the keyframe editor above, over every body in the roster.
   Keys are the animation; everything between them is interpolation. The
-  **keys timeline** holds ◆ diamonds at their true times — spacing can be
-  non-uniform — drag one to retime it (magnetic frame snap, Alt for free),
-  double-click anywhere to add a key, click a diamond to select it (ease,
-  clear, copy/paste then target that exact key), right-click for actions,
-  and edit the whole clip's duration inline. Below it, the **frames
-  filmstrip** shows the sampled grid the clip plays/exports at: every cell
-  renders the real character, on-frame keys wear a ◆ badge, the amber line
-  marks the tween, and assembled clips grow via the ＋ cell. Assembled
-  bodies even play back continuously — sampling the keys at the exact
-  elapsed time. Every edit is undoable.
+  **keys timeline** shows every key **with its rendered pose** at its true
+  time — spacing can be non-uniform — drag a key ANYWHERE (hold Shift to
+  snap to frames), double-click to add one, ＋◆/－◆ buttons key/unkey the
+  playhead, click a key to select it (ease, clear, copy/paste then target
+  that exact key), right-click for actions, and edit the whole clip's
+  duration inline. The **frames strip** (the sampled grid the clip
+  plays/exports at) is tucked behind a `frames ▸` toggle, with ＋/－ cells
+  to grow or shrink assembled clips. Assembled bodies play back
+  continuously — sampling the keys at the exact elapsed time. Every edit
+  is undoable, and add/delete controls sit right next to whatever they act
+  on (clips ✕, keys ＋◆/－◆, characters ✕, bones ＋/✕).
 - **Assemble** — import pictures, attach them as bones, drag/rotate/scale
   them into a rig, parent bones into a hierarchy, and configure each joint
   (free / hinge with limits / welded). Assembled characters join the roster
@@ -92,6 +93,12 @@ the selection, and drag it into place — the gizmo moves, the round handle
 rotates (Shift snaps to 15°), the square handle scales; the inspector has the
 numeric fields, parent dropdown, joint config, and draw order. Press **?**
 anywhere for the shortcut list.
+
+The demo also ships **scout kit** under the *assembled* group — a fully
+editable, part-built version of the cast (open it in Assemble mode, move its
+bones, retime its `wave` keys) — so you can play with a finished rig before
+building your own. The three procedural bodies demonstrate the
+game-integration path; assembled characters are yours to edit freely.
 
 ---
 

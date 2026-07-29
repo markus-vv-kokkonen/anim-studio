@@ -750,9 +750,31 @@ export function mountAssembly(deps: AssemblyDeps): AssemblyPane {
       meta.appendChild(el('div', 'nm', d.name));
       meta.appendChild(el('div', 'ti', `${d.bones.length} bones · ${d.clips.length} clips`));
       row.appendChild(meta);
+      const rm = el('button', 'asm-rowbtn danger', '✕');
+      rm.title = `delete “${d.name}”`;
+      rm.onclick = (ev) => {
+        ev.stopPropagation();
+        void deleteDoc(d.id);
+      };
+      row.appendChild(rm);
       row.onclick = () => selectDoc(d.id);
       charList.appendChild(row);
     }
+  }
+
+  /** Confirm + delete a bone (with its subtree) — shared by the inspector
+   *  button, the tree row ✕, and the Delete key. */
+  function confirmDeleteBone(bone: SkelBone): void {
+    if (!doc) return;
+    const d = doc;
+    const n = 1 + descendants(d, bone.id).size;
+    void deps.confirmBox(n > 1 ? `Delete “${bone.id}” and its ${n - 1} child bone(s)?` : `Delete bone “${bone.id}”?`).then((ok) => {
+      if (!ok) return;
+      withDoc('delete bone', () => {
+        removeBone(d, bone.id);
+        selBone = null;
+      });
+    });
   }
 
   // ---- inspector panels ----------------------------------------------------
@@ -798,6 +820,26 @@ export function mountAssembly(deps: AssemblyDeps): AssemblyPane {
         row.appendChild(el('span', 'asm-treedot' + (b.img ? ' img' : '')));
         row.appendChild(el('span', undefined, b.id));
         if (b.joint.type !== 'free') row.appendChild(el('span', 'asm-treejoint', b.joint.type === 'hinge' ? '⟲' : '⚓'));
+        const spacer = el('span');
+        spacer.style.flex = '1';
+        row.appendChild(spacer);
+        const addC = el('button', 'asm-rowbtn', '＋');
+        addC.title = `add a child bone under “${b.id}”`;
+        addC.onclick = (ev) => {
+          ev.stopPropagation();
+          withDoc('add bone', () => {
+            const nb = addBone(d, { name: 'bone', parent: b.id, x: 12, y: 0 });
+            selBone = nb.id;
+          });
+        };
+        row.appendChild(addC);
+        const rm = el('button', 'asm-rowbtn danger', '✕');
+        rm.title = `delete “${b.id}”` + (descendants(d, b.id).size ? ' and its children' : '');
+        rm.onclick = (ev) => {
+          ev.stopPropagation();
+          confirmDeleteBone(b);
+        };
+        row.appendChild(rm);
         row.onclick = () => {
           selBone = b.id;
           renderPanels();
@@ -872,16 +914,7 @@ export function mountAssembly(deps: AssemblyDeps): AssemblyPane {
       selBone = nb.id;
     });
     const del = el('button', 'as-mini as-danger', '🗑 delete');
-    del.onclick = () => {
-      const n = 1 + descendants(d, bone.id).size;
-      void deps.confirmBox(n > 1 ? `Delete “${bone.id}” and its ${n - 1} child bone(s)?` : `Delete bone “${bone.id}”?`).then((ok) => {
-        if (!ok) return;
-        withDoc('delete bone', () => {
-          removeBone(d, bone.id);
-          selBone = null;
-        });
-      });
-    };
+    del.onclick = () => confirmDeleteBone(bone);
     holder.appendChild(fieldRow('', addChild, del));
 
     // joint
@@ -1078,15 +1111,7 @@ export function mountAssembly(deps: AssemblyDeps): AssemblyPane {
     if (e.type !== 'keydown') return false;
     const bone = curBone();
     if ((e.key === 'Delete' || e.key === 'Backspace') && bone && doc) {
-      const d = doc;
-      const n = 1 + descendants(d, bone.id).size;
-      void deps.confirmBox(n > 1 ? `Delete “${bone.id}” and its ${n - 1} child bone(s)?` : `Delete bone “${bone.id}”?`).then((ok) => {
-        if (!ok) return;
-        withDoc('delete bone', () => {
-          removeBone(d, bone.id);
-          selBone = null;
-        });
-      });
+      confirmDeleteBone(bone);
       return true;
     }
     if (e.key === 'Escape' && selBone) {
