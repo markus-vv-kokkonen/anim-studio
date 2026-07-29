@@ -45,7 +45,20 @@ export interface ProjectPluginOptions {
   configFile: string;
   /** Directory `configFile` resolves against (pass your vite `__dirname`). */
   root?: string;
+  /** GET/POST path for the active project's skeletons file.
+   *
+   *  NOT `/__anim/skeletons`: a host may register `save-plugin.ts` as well (this
+   *  repo does, for the demo), both would claim that path, and the first one
+   *  registered silently wins — which showed up as the standalone studio
+   *  serving the demo's characters while claiming to edit another project. */
+  skeletonsEndpoint?: string;
 }
+
+/** Paths the project's assets must never shadow: the studio's own entry and
+ *  the demo's. Without this, selecting a project whose `publicDir` contains an
+ *  `index.html` (the demo project's does) would serve THAT at `/` and the
+ *  studio would be unreachable. */
+const RESERVED = new Set(['/', '/index.html', '/main.ts']);
 
 export function animStudioProjectPlugin(opts: ProjectPluginOptions): Plugin {
   const configPath = path.resolve(opts.root ?? '.', opts.configFile);
@@ -124,7 +137,7 @@ export function animStudioProjectPlugin(opts: ProjectPluginOptions): Plugin {
       });
 
       // ---- the active project's skeletons file ----
-      server.middlewares.use('/__anim/skeletons', (req, res, next) => {
+      server.middlewares.use(opts.skeletonsEndpoint ?? '/__anim/project-skeletons', (req, res, next) => {
         const r = req as unknown as Req;
         const w = res as unknown as Res;
         let cfg: ProjectConfig | null;
@@ -155,42 +168,47 @@ export function animStudioProjectPlugin(opts: ProjectPluginOptions): Plugin {
         });
       });
 
-      // ---- static fallback: the active project's publicDir at the server root ----
-      // Returned as a post-hook so it registers AFTER Vite's own middlewares:
-      // the studio's own modules and HTML win, and only paths Vite does not
-      // claim fall through to the project's assets.
-      return () => {
-        server.middlewares.use((req, res, next) => {
-          const r = req as unknown as Req;
-          const w = res as unknown as Res;
-          if (r.method !== 'GET' && r.method !== 'HEAD') return next();
-          const url = (r.url ?? '').split('?')[0];
-          if (!url || url.startsWith('/__anim') || url.startsWith('/@')) return next();
-          let cfg: ProjectConfig | null;
-          try {
-            cfg = readConfig();
-          } catch {
-            return next();
-          }
-          if (!cfg) return next();
-          const proj = active(cfg);
-          const base = path.resolve(proj.root, proj.publicDir);
-          let rel: string;
-          try {
-            rel = decodeURIComponent(url);
-          } catch {
-            return next(); // malformed percent-encoding is not an asset path
-          }
-          const file = safeJoin(base, rel);
-          if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile()) return next();
-          w.statusCode = 200;
-          w.setHeader('content-type', MIME[path.extname(file).toLowerCase()] ?? 'application/octet-stream');
-          // No caching: an artist re-bakes a part and reloads, and a 304 there
-          // would show them yesterday's PNG and cost an hour.
-          w.setHeader('cache-control', 'no-store');
-          fs.createReadStream(file).pipe(res as unknown as NodeJS.WritableStream);
-        });
-      };
+      // ---- static: the active project's publicDir at the server root ----
+      //
+      // Registered BEFORE Vite's own middlewares, which is the opposite of the
+      // obvious choice and the only one that works. Vite's html fallback
+      // answers EVERY unmatched path with index.html — `/nonexistent.png`
+      // returns 200 text/html, not a 404 — so a handler registered after it
+      // never runs at all. Serving first is safe because this claims a path
+      // only when it names a real file inside the project's publicDir, and
+      // calls next() otherwise; that is exactly Vite's own `publicDir`
+      // semantics, pointed at another repo.
+      server.middlewares.use((req, res, next) => {
+        const r = req as unknown as Req;
+        const w = res as unknown as Res;
+        if (r.method !== 'GET' && r.method !== 'HEAD') return next();
+        const url = (r.url ?? '').split('?')[0];
+        if (!url || RESERVED.has(url)) return next();
+        if (url.startsWith('/__anim') || url.startsWith('/@') || url.startsWith('/node_modules/')) return next();
+        let cfg: ProjectConfig | null;
+        try {
+          cfg = readConfig();
+        } catch {
+          return next();
+        }
+        if (!cfg) return next();
+        const proj = active(cfg);
+        const base = path.resolve(proj.root, proj.publicDir);
+        let rel: string;
+        try {
+          rel = decodeURIComponent(url);
+        } catch {
+          return next(); // malformed percent-encoding is not an asset path
+        }
+        const file = safeJoin(base, rel);
+        if (!file || !fs.existsSync(file) || !fs.statSync(file).isFile()) return next();
+        w.statusCode = 200;
+        w.setHeader('content-type', MIME[path.extname(file).toLowerCase()] ?? 'application/octet-stream');
+        // No caching: an artist re-bakes a part and reloads, and a 304 there
+        // would show them yesterday's PNG and cost an hour.
+        w.setHeader('cache-control', 'no-store');
+        fs.createReadStream(file).pipe(res as unknown as NodeJS.WritableStream);
+      });
     },
   };
 }
