@@ -67,6 +67,37 @@ export interface Keyframe {
   pose: Pose;
 }
 
+/**
+ * Optional per-clip RANDOM VARIATION — the "don't play it identically every
+ * loop" layer. It is applied at SAMPLING time from a deterministic seed, never
+ * baked into the keys: the authored data stays exact, and a given
+ * (seed, cycle) always reproduces the same variation. Absent (or all-zero) →
+ * every cycle plays the authored motion exactly, so this is inert until
+ * configured.
+ *
+ * Amounts are fractions (0.15 = ±15%), drawn fresh per LOOP CYCLE — constant
+ * within a cycle, so one playthrough stays smooth.
+ */
+export interface ClipVariation {
+  /** ± amplitude jitter: how far the motion actually travels. 0.15 means a
+   *  swing lands anywhere from 85% (falls short) to 115% (overshoots) of the
+   *  authored pose. Drawn per bone, so limbs vary independently. */
+  amp?: number;
+  /** ± playback-speed jitter per cycle (0.1 = ±10% faster/slower). The host
+   *  applies it to its clock; {@link VariationState.speed} carries the value. */
+  speed?: number;
+  /** ± clip-time phase offset per cycle (wraps), so looping bodies drift out
+   *  of lockstep with each other instead of marching in sync. */
+  phase?: number;
+  /** Per-bone amplitude weights (default 1). `{ root: 0.2 }` keeps the body
+   *  steady while the limbs vary; `0` pins a bone to its authored pose. */
+  bones?: Record<string, number>;
+  /** Base seed. Change it for a different (still repeatable) variation set;
+   *  hosts add their own per-instance seed on top so two on-screen copies of
+   *  the same body don't move identically. */
+  seed?: number;
+}
+
 /** An authored timeline for one clip of one body. `duration` (ms) is meant for
  *  PRESENTATION clips (idle / walk / hit): the host re-times the whole clip
  *  over `duration` with uniform per-frame time. Attack clips should ignore it —
@@ -76,6 +107,9 @@ export interface Keyframe {
 export interface ClipTimeline {
   duration?: number;
   keys: Keyframe[];
+  /** Optional per-cycle randomisation (see {@link ClipVariation}). Absent →
+   *  the clip replays exactly as authored, every cycle. */
+  variation?: ClipVariation;
 }
 
 /** Clip id — whatever your game bakes, e.g. `idle|walk|attack|hit`. */

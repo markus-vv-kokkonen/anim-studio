@@ -9,6 +9,7 @@ Contents:
 6. [Keeping edits diff-stable](#6-keeping-edits-diff-stable)
 7. [MotionOverride](#7-motionoverride)
 8. [Assembled characters (the skeleton file)](#8-assembled-characters)
+9. [Per-clip variation](#9-per-clip-variation)
 
 ---
 
@@ -17,7 +18,7 @@ Contents:
 ```
 ClipStore:    bodyId → BodyClips
 BodyClips:    clipId → ClipTimeline
-ClipTimeline: { duration?: number; keys: Keyframe[] }
+ClipTimeline: { duration?: number; keys: Keyframe[]; variation?: ClipVariation }
 Keyframe:     { t: number; ease?: Ease; pose: Pose }
 Pose:         boneId → BoneOffset          // e.g. { arm1: { dAng: 0.7 }, root: { dx: 2 } }
 ```
@@ -279,3 +280,47 @@ SkelClip:     { key, name, frames, fps }         // key stable, name renamable
   filled, unknown parents cleared, ≥1 clip guaranteed). Attachment images are
   embedded data URIs (imports are capped at 512px on the long edge). The file
   is generated: exclude it from formatters like the clips file.
+
+---
+
+## 9. Per-clip variation
+
+`ClipTimeline.variation` (optional) keeps repeating clips from playing
+identically forever. `src/variation.ts` is a pure leaf module like `sample.ts`.
+
+```ts
+ClipVariation: {
+  amp?: number       // ± travel: 0.15 = lands 85%..115% of the authored pose
+  speed?: number     // ± tempo per loop
+  phase?: number     // ± start offset per loop (wraps; desyncs copies)
+  bones?: Record<string, number>  // per-bone amp weights (0 pins, 1 default)
+  seed?: number      // base seed; hosts XOR a per-instance seed on top
+}
+```
+
+**How it behaves** (rule 7 in SKILL.md):
+- Amounts are drawn **per loop cycle**, constant through it → one playthrough
+  is smooth. `amp` is drawn **per bone**, so limbs vary independently.
+- **Relative** channels (`dAng`, `ikDx/ikDy`) are scaled directly. **Absolute**
+  channels are scaled about the clip's **first key** for that bone/channel —
+  "85% of the way from the starting pose," never dragged toward the origin; an
+  absolute with no anchor is left alone.
+- A pose of magnitude 0 scales to 0, so a clip that starts and ends at rest
+  **loops seamlessly** even as cycles vary.
+- Deterministic by hash of `(seed, cycle, bone)` — never `Math.random()`.
+
+**Using it:**
+
+```ts
+import { samplePoseVaried, variationFor } from 'anim-studio';
+
+const cycle = Math.floor(elapsedMs / clipMs);
+const pose  = samplePoseVaried(tl, t, cycle, entityId);      // drop-in for samplePose
+const rate  = variationFor(tl.variation, cycle, entityId).speed; // for your clock
+```
+
+`samplePoseVaried` with no config is exactly `samplePose`. `applyVariation`
+never mutates the authored pose. `prunedClips` keeps a variation-only timeline,
+so the config survives a Save. In the studio, the Variation panel writes it and
+previews it **only while playing** — posing/scrubbing always shows the exact
+authored pose.

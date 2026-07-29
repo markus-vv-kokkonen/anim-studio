@@ -31,6 +31,9 @@ authoredKeys(): number      save(): Promise<boolean>
 mode(): 'animate'|'assemble'    setMode(m): void
 undo(): string|null             redo(): string|null
 
+// per-clip random variation (current body + clip)
+getVariation(): ClipVariation|undefined    setVariation(patch): boolean
+
 // keyframe CRUD (current body + clip; frame indices within the clip)
 moveKey(fromFrame, toFrame): boolean    copyKey(): boolean    pasteKey(): boolean
 
@@ -148,6 +151,8 @@ seam is where silent divergence hides.
 | Save produced a **huge or unstable diff** | The magnitude points at the cause: **thousands of lines** = an external formatter (Prettier / ESLint `--fix` / format-on-save / a pre-commit hook) re-expanded the compact one-line literal, or the baseline was seeded from **Copy JSON** (which pretty-prints) then Saved via the compact endpoint; **header only** = the plugin `banner` doesn't byte-match the file; **small but reordering keys** = a hand/tool edit left `keys` unsorted; **changed values** = a float got quantized | Exclude the generated clips file from formatters (`.prettierignore` / `.eslintignore`, format-on-save, pre-commit) and mark it `linguist-generated`; canonicalize the baseline once in its own commit (re-emit through `emitClipsModule` with the file's exact banner); keep the literal compact, never quantize, keep each `keys` array sorted by `t` (data-format §6) |
 | Converted baseline **not byte-identical** on replay | A float was quantized; an absolute channel is defined on only one surrounding key and the bake sampled between keys; bone ids drifted; or the captured `val` was wrong | Keep full precision; ensure captures land *on* keys; fix draw order; let the pixel-identical write gate catch it (§3) |
 | A between-keys frame **snaps to procedural** on one axis | One-sided absolute channel — defined on one key but not the other (data-format §3, Rule C) | Define the absolute on *both* surrounding keys, or use a relative channel |
+| Motion **varies when it shouldn't** (a replay/bake won't reproduce) | A `variation` config is set on that clip, or the host passes a changing `cycle`/instance seed into `samplePoseVaried` | Zero the Variation amounts (the config drops out entirely) or call `samplePose`; remember variation is per-cycle by design — pass a fixed `cycle` for a reproducible bake |
+| Variation **pops at the loop point** | The clip doesn't start and end at the same pose, so a per-cycle amplitude change is visible at the seam | Make the first and last key match (ideally rest, where scaling is a no-op), or lower `amp` |
 | An **attack's timing / a hazard beat moved** after authoring | A combat clip was marked `retimable`, or the game applies `duration` to combat clips | Mark only presentation clips (idle/walk/hit) `retimable`; keep attack tempo as combat data applied at play time (rule 5) |
 | Studio preview looks right but the **game differs** | Not faithful by construction: `clips`/`plan` weren't derived from the same source the game bakes from, or `renderPose` diverges from the real bake | Derive `clips` and `plan` in one pass from the bake source; make `renderPose` draw through the same code the game bakes from (rule 3) |
 | `save()` returns false / "no dev save endpoint" | The Vite plugin isn't mounted, the endpoint doesn't match, or you're on a static build (`apply: 'serve'` only) | Mount `animStudioSavePlugin` in `vite.config.ts`, match `endpoint` to `adapter.save.endpoint`, run the dev server; offline, use **copy JSON** |
@@ -160,7 +165,7 @@ In this repo (a host game wires equivalents into its own scripts):
 
 - `npm run dev` — the demo studio at `/demo/`, the authoring workbench.
 - `npm test` — `node:test` over the pure modules (`sample`, `emit`, `timeline`,
-  `skeleton`).
+  `skeleton`, `variation`).
 - `npm run verify` — the full headless loop in Chromium (§1): the authoring
   loop, then Assemble mode (build a character, clip + key CRUD, persistence,
   reload survival); non-destructive, restores `demo/clips.ts` and
