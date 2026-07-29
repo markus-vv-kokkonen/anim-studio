@@ -114,12 +114,13 @@ export interface SkelBone {
 }
 
 /** A user-defined clip: `key` is the stable timeline id, `name` the renamable
- *  display label, `frames` × `per` (ms) the sampling grid. */
+ *  display label. Timing is fps-based: the clip runs `frames` samples at
+ *  `fps` frames/second, so duration = frames / fps (60 frames @ 60fps = 1s). */
 export interface SkelClip {
   key: string;
   name: string;
   frames: number;
-  per: number;
+  fps: number;
 }
 
 /** One assembled character — self-contained: rig, clips, and authored
@@ -137,10 +138,21 @@ export interface SkeletonDoc {
   timelines: BodyClips;
 }
 
-/** The persisted file: every assembled character, keyed by doc id. */
+/** An imported picture in the parts bin (kept in the file so the bin
+ *  survives reloads — attached copies live on the bones themselves). */
+export interface SkelPart {
+  name: string;
+  src: string;
+  w: number;
+  h: number;
+}
+
+/** The persisted file: every assembled character (keyed by doc id) plus the
+ *  shared parts bin. */
 export interface SkeletonFile {
   version: 1;
   skeletons: Record<string, SkeletonDoc>;
+  parts?: SkelPart[];
 }
 
 /** Store-key prefix separating assembled bodies from the host game's bodies —
@@ -202,7 +214,7 @@ export function createSkeleton(id: string, name: string, fw = 192, fh = 192): Sk
     z: 0,
     joint: { type: 'free', min: 0, max: 0 },
   });
-  addClip(doc, 'idle', 8, 120);
+  addClip(doc, 'idle'); // 60 frames @ 60fps = one second
   return doc;
 }
 
@@ -378,8 +390,8 @@ export function worldTransforms(doc: SkeletonDoc, pose?: Pose): Map<string, Mat2
 // clip ops
 // ---------------------------------------------------------------------------
 
-export function addClip(doc: SkeletonDoc, name: string, frames = 8, per = 120): SkelClip {
-  const clip: SkelClip = { key: uniqueClipKey(doc, name), name: name.trim() || 'clip', frames: clampFrames(frames), per: clampPer(per) };
+export function addClip(doc: SkeletonDoc, name: string, frames = 60, fps = 60): SkelClip {
+  const clip: SkelClip = { key: uniqueClipKey(doc, name), name: name.trim() || 'clip', frames: clampFrames(frames), fps: clampFps(fps) };
   doc.clips.push(clip);
   return clip;
 }
@@ -406,20 +418,47 @@ export function removeClip(doc: SkeletonDoc, key: string): boolean {
 export function duplicateClip(doc: SkeletonDoc, key: string): SkelClip | null {
   const c = doc.clips.find((x) => x.key === key);
   if (!c) return null;
-  const copy = addClip(doc, c.name + ' copy', c.frames, c.per);
+  const copy = addClip(doc, c.name + ' copy', c.frames, c.fps);
   const tl = doc.timelines[key];
   if (tl) doc.timelines[copy.key] = JSON.parse(JSON.stringify(tl)) as BodyClips[string];
   return copy;
 }
 
-const clampFrames = (n: number): number => Math.max(1, Math.min(120, Math.round(n) || 1));
-const clampPer = (n: number): number => Math.max(16, Math.min(2000, Math.round(n) || 120));
+const clampFrames = (n: number): number => Math.max(1, Math.min(600, Math.round(n) || 1));
+/** Fractional fps allowed (legacy per-ms clips convert to e.g. 8.33). */
+const clampFps = (n: number): number => Math.max(1, Math.min(240, Number(n) || 60));
 
-export function patchClip(doc: SkeletonDoc, key: string, patch: { frames?: number; per?: number }): boolean {
+/** Snap a timeline's keys onto a new frame grid (t = k/(n-1)) so every key
+ *  stays ON a frame — an off-grid key would still sample but could no longer
+ *  be seen or edited on the filmstrip. Keys that collide on the same slot
+ *  keep the earliest. */
+function snapKeysToGrid(tl: ClipTimelineLike | undefined, frames: number): void {
+  if (!tl) return;
+  const snap = (t: number): number => (frames <= 1 ? 0 : Math.round(t * (frames - 1)) / (frames - 1));
+  const seen = new Set<number>();
+  const out: typeof tl.keys = [];
+  for (const k of [...tl.keys].sort((a, b) => a.t - b.t)) {
+    const t = snap(k.t);
+    if (seen.has(t)) continue;
+    seen.add(t);
+    k.t = t;
+    out.push(k);
+  }
+  tl.keys = out;
+}
+type ClipTimelineLike = BodyClips[string];
+
+export function patchClip(doc: SkeletonDoc, key: string, patch: { frames?: number; fps?: number }): boolean {
   const c = doc.clips.find((x) => x.key === key);
   if (!c) return false;
-  if (patch.frames !== undefined) c.frames = clampFrames(patch.frames);
-  if (patch.per !== undefined) c.per = clampPer(patch.per);
+  if (patch.frames !== undefined) {
+    const next = clampFrames(patch.frames);
+    if (next !== c.frames) {
+      c.frames = next;
+      snapKeysToGrid(doc.timelines[key], next);
+    }
+  }
+  if (patch.fps !== undefined) c.fps = clampFps(patch.fps);
   return true;
 }
 
@@ -447,9 +486,10 @@ export function restoreDoc(doc: SkeletonDoc, snap: string): void {
 // (de)serialisation — canonical and diff-stable, like emit.ts
 // ---------------------------------------------------------------------------
 
-/** Serialise every doc into the skeleton-file JSON: deep-sorted keys, bones
- *  sorted by id, timelines pruned of empties — a one-bone edit diffs small. */
-export function packSkeletons(docs: SkeletonDoc[]): string {
+/** Serialise every doc (and the parts bin) into the skeleton-file JSON:
+ *  deep-sorted keys, bones sorted by id, timelines pruned of empties — a
+ *  one-bone edit diffs small. */
+export function packSkeletons(docs: SkeletonDoc[], parts: SkelPart[] = []): string {
   const skeletons: Record<string, unknown> = {};
   for (const doc of docs) {
     skeletons[doc.id] = {
@@ -459,7 +499,7 @@ export function packSkeletons(docs: SkeletonDoc[]): string {
       timelines: prunedClips({ [doc.id]: doc.timelines })[doc.id] ?? {},
     };
   }
-  return JSON.stringify(stableClips({ version: 1, skeletons }), null, 0) + '\n';
+  return JSON.stringify(stableClips({ version: 1, skeletons, parts }), null, 0) + '\n';
 }
 
 const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) ? v : d);
@@ -490,7 +530,7 @@ function normaliseBone(raw: Record<string, unknown>, i: number): SkelBone {
 /** Parse a skeleton file defensively: defaults are filled, unknown parents are
  *  cleared, and a doc always ends up with ≥1 clip — so a hand-edited file
  *  loads rather than wedging the studio. Throws only on invalid JSON. */
-export function unpackSkeletons(text: string): SkeletonDoc[] {
+export function unpackSkeletons(text: string): { skeletons: SkeletonDoc[]; parts: SkelPart[] } {
   const root = JSON.parse(text || '{}') as Record<string, unknown>;
   const skeletons = (root.skeletons ?? {}) as Record<string, Record<string, unknown>>;
   const docs: SkeletonDoc[] = [];
@@ -506,8 +546,9 @@ export function unpackSkeletons(text: string): SkeletonDoc[] {
       clips: clipsRaw.map((c, i) => ({
         key: str(c.key, `clip${i}`),
         name: str(c.name, str(c.key, `clip ${i + 1}`)),
-        frames: clampFrames(num(c.frames, 8)),
-        per: clampPer(num(c.per, 120)),
+        frames: clampFrames(num(c.frames, 60)),
+        // fps-based; legacy files carried per-frame ms instead
+        fps: clampFps(typeof c.fps === 'number' ? (c.fps as number) : 1000 / num(c.per, 1000 / 60)),
       })),
       timelines: (raw.timelines && typeof raw.timelines === 'object' ? raw.timelines : {}) as BodyClips,
     };
@@ -516,5 +557,9 @@ export function unpackSkeletons(text: string): SkeletonDoc[] {
     if (!doc.clips.length) addClip(doc, 'idle');
     docs.push(doc);
   }
-  return docs;
+  const partsRaw = Array.isArray(root.parts) ? (root.parts as Record<string, unknown>[]) : [];
+  const parts: SkelPart[] = partsRaw
+    .filter((p) => p && typeof p.src === 'string')
+    .map((p) => ({ name: str(p.name, 'part'), src: p.src as string, w: num(p.w, 1), h: num(p.h, 1) }));
+  return { skeletons: docs, parts };
 }

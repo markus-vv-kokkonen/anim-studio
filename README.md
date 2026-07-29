@@ -16,8 +16,18 @@ version-controlled data that both you and an agent can iterate on.
 The studio has two modes, Spine-style:
 
 - **Animate** — the keyframe editor above, over every body in the roster.
-  Keys move on the dope sheet (drag), copy/paste between frames, and every
-  edit is undoable.
+  Keys are the animation; everything between them is interpolation. The
+  **keys timeline** shows every key **with its rendered pose** at its true
+  time — spacing can be non-uniform — drag a key ANYWHERE (hold Shift to
+  snap to frames), double-click to add one, ＋◆/－◆ buttons key/unkey the
+  playhead, click a key to select it (ease, clear, copy/paste then target
+  that exact key), right-click for actions, and edit the whole clip's
+  duration inline. The **frames strip** (the sampled grid the clip
+  plays/exports at) is tucked behind a `frames ▸` toggle, with ＋/－ cells
+  to grow or shrink assembled clips. Assembled bodies play back
+  continuously — sampling the keys at the exact elapsed time. Every edit
+  is undoable, and add/delete controls sit right next to whatever they act
+  on (clips ✕, keys ＋◆/－◆, characters ✕, bones ＋/✕).
 - **Assemble** — import pictures, attach them as bones, drag/rotate/scale
   them into a rig, parent bones into a hierarchy, and configure each joint
   (free / hinge with limits / welded). Assembled characters join the roster
@@ -71,7 +81,7 @@ bun run verify         # headless end-to-end: pose → key → save → replay,
                        # then assemble → clip CRUD → key CRUD → reload
 ```
 
-In the demo: pick **scout**, choose the *attack* clip, tick **pose edit**,
+In the demo: pick **scout**, choose the *attack* clip, turn on **✎ pose edit**,
 drag the staff arm (cyan), a foot (green) or the body root (amber), then
 **Save** — the key lands in `demo/clips.ts`, and on reload the baked clip
 plays your edit. `demo/bodies.ts` is the integration example: a real game
@@ -84,6 +94,12 @@ rotates (Shift snaps to 15°), the square handle scales; the inspector has the
 numeric fields, parent dropdown, joint config, and draw order. Press **?**
 anywhere for the shortcut list.
 
+The demo also ships **scout kit** under the *assembled* group — a fully
+editable, part-built version of the cast (open it in Assemble mode, move its
+bones, retime its `wave` keys) — so you can play with a finished rig before
+building your own. The three procedural bodies demonstrate the
+game-integration path; assembled characters are yours to edit freely.
+
 ---
 
 ## Assemble mode — characters from parts
@@ -92,7 +108,9 @@ Everything needed to build a cut-out character and hand it a skeleton rig:
 
 - **Parts** — import images (file picker or drag-drop onto the canvas). Each
   import is capped at 512px on the long edge and embedded as a data URI, so a
-  character document is fully self-contained.
+  character document is fully self-contained. The bin itself persists with
+  the skeletons file, so imported parts are remembered across sessions
+  (hover a part for ✕ to remove it from the bin).
 - **Bones** — a part attaches as a new bone under the selected bone; empty
   bones (`+ bone`) give the rig structure. Select on canvas or in the
   skeleton tree; move / rotate / scale with the gizmo or the inspector's
@@ -105,10 +123,12 @@ Everything needed to build a cut-out character and hand it a skeleton rig:
 - **Joints** — per-bone: `free` (unlimited rotation), `hinge` (min/max degree
   limits, enforced when posing), `fixed` (welded — pose drags can't rotate
   it).
-- **Clips** — assembled characters own their clip list: `+ clip` to add,
-  double-click a tab to rename, `⋯` to duplicate/delete, and the inspector
-  sets frame count and duration. Clip keys stay stable across renames, so
-  timelines follow the clip.
+- **Clips** — assembled characters own their clip list: `+ new clip` to add,
+  double-click a tab to rename, `✕`/`⋯` to delete/duplicate. Timing is
+  fps-based — **60 fps by default, configurable per clip** — with duration,
+  fps, and frame count editable in the inspector (a new clip is 60 frames @
+  60 fps = one second). Clip keys stay stable across renames, so timelines
+  follow the clip.
 - **Animating** — an assembled body poses exactly like a procedural one:
   drag rotates a joint (within its limits), Shift-drag translates it, keys
   land on the dope sheet where they can be dragged between frames,

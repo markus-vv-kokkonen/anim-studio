@@ -110,7 +110,7 @@ export function skeletonClipDefs(doc: SkeletonDoc): { clips: ClipDef[]; plan: Pl
   let at = 0;
   for (const c of doc.clips) {
     const frames = Array.from({ length: c.frames }, (_, k) => at + k);
-    clips.push({ name: c.name, clipKey: c.key, frames, delays: frames.map(() => c.per), retimable: true });
+    clips.push({ name: c.name, clipKey: c.key, frames, delays: frames.map(() => 1000 / c.fps), retimable: true });
     for (let k = 0; k < c.frames; k++) plan.push({ clip: c.key, t: c.frames === 1 ? 0 : k / (c.frames - 1) });
     at += c.frames;
   }

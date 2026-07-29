@@ -46,7 +46,9 @@ patchSkelBone(docId, boneId, {x?, y?, rot?, sx?, sy?, len?, z?, joint?, name?, p
 ```
 
 The API bypasses UI confirmation dialogs (`deleteSkeleton`, `deleteClip` act
-immediately) — the dialogs exist for humans.
+immediately) — the dialogs exist for humans. `moveKey` onto a frame that
+already carries a key **swaps** the two keys (reorder); onto an empty frame it
+retimes the key.
 
 Note `bones()` returns the discovered joints only *after* `setPose(true)` has
 rendered a pose frame. There is no `setFrame` on the hook — to land on a specific

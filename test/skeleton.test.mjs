@@ -122,13 +122,15 @@ test('draw order: bonesByZ sorts, moveBoneZ swaps neighbours', () => {
 
 test('clip CRUD: add/rename/patch/duplicate/remove, last clip protected', () => {
   const doc = createSkeleton('c', 'c');
-  const walk = addClip(doc, 'walk', 10, 90);
+  assert.equal(doc.clips[0].fps, 60); // 60fps default: 60 frames = one second
+  assert.equal(doc.clips[0].frames, 60);
+  const walk = addClip(doc, 'walk', 10, 30);
   assert.equal(walk.key, 'walk');
   assert.ok(renameClip(doc, 'walk', 'stride'));
   assert.equal(doc.clips.find((x) => x.key === 'walk').name, 'stride'); // key stable across rename
-  assert.ok(patchClip(doc, 'walk', { frames: 200, per: 1 }));
-  assert.equal(doc.clips.find((x) => x.key === 'walk').frames, 120); // clamped
-  assert.equal(doc.clips.find((x) => x.key === 'walk').per, 16); // clamped
+  assert.ok(patchClip(doc, 'walk', { frames: 2000, fps: 900 }));
+  assert.equal(doc.clips.find((x) => x.key === 'walk').frames, 600); // clamped
+  assert.equal(doc.clips.find((x) => x.key === 'walk').fps, 240); // clamped
   doc.timelines.walk = { keys: [{ t: 0.5, pose: { root: { dAng: 1 } } }] };
   const dup = duplicateClip(doc, 'walk');
   assert.equal(dup.name, 'stride copy');
@@ -140,6 +142,33 @@ test('clip CRUD: add/rename/patch/duplicate/remove, last clip protected', () => 
   assert.equal(removeClip(doc, 'idle'), false); // never remove the last clip
 });
 
+test('patchClip frame-count change snaps keys to the new grid', () => {
+  const doc = createSkeleton('c', 'c');
+  patchClip(doc, 'idle', { frames: 8 });
+  doc.timelines.idle = { keys: [
+    { t: 0, pose: { root: { dAng: 1 } } },
+    { t: 3 / 7, pose: { root: { dAng: 2 } } },
+    { t: 1, pose: { root: { dAng: 3 } } },
+  ] };
+  patchClip(doc, 'idle', { frames: 5 }); // grid denominators 7 → 4
+  assert.deepEqual(doc.timelines.idle.keys.map((k) => k.t), [0, 0.5, 1]);
+  patchClip(doc, 'idle', { frames: 2 }); // collisions keep the earliest key
+  assert.deepEqual(doc.timelines.idle.keys.map((k) => k.pose.root.dAng), [1, 2]);
+  assert.deepEqual(doc.timelines.idle.keys.map((k) => k.t), [0, 1]);
+  // fps changes never move keys (t is normalised clip-time)
+  patchClip(doc, 'idle', { fps: 24 });
+  assert.deepEqual(doc.timelines.idle.keys.map((k) => k.t), [0, 1]);
+});
+
+test('unpack converts legacy per-ms clips to fps', () => {
+  const [doc] = unpackSkeletons(JSON.stringify({
+    version: 1,
+    skeletons: { old: { bones: [], clips: [{ key: 'idle', name: 'idle', frames: 8, per: 125 }] } },
+  })).skeletons;
+  assert.equal(doc.clips[0].fps, 8); // 125ms per frame = 8fps
+  assert.equal(doc.clips[0].frames, 8);
+});
+
 test('pack → unpack round-trips a doc (bones by z, empty timelines pruned)', () => {
   const doc = createSkeleton('hero', 'Hero', 128, 160);
   const arm = addBone(doc, { name: 'arm', x: 3.5, rot: 0.25, img: { src: 'data:x', w: 8, h: 8, ax: 0, ay: 4, rot: 0, sx: 1, sy: 1 } });
@@ -149,7 +178,7 @@ test('pack → unpack round-trips a doc (bones by z, empty timelines pruned)', (
   const text = packSkeletons([doc]);
   assert.ok(text.endsWith('\n'));
   assert.equal(text, packSkeletons([doc]), 'pack is deterministic');
-  const [back] = unpackSkeletons(text);
+  const [back] = unpackSkeletons(text).skeletons;
   assert.equal(back.id, 'hero');
   assert.equal(back.name, 'Hero');
   assert.equal(back.fw, 128);
@@ -163,9 +192,20 @@ test('unpack is defensive: bad parents cleared, missing clips defaulted', () => 
   const [doc] = unpackSkeletons(JSON.stringify({
     version: 1,
     skeletons: { junk: { bones: [{ id: 'a', parent: 'ghost' }], clips: [] } },
-  }));
+  })).skeletons;
   assert.equal(doc.name, 'junk');
   assert.equal(boneById(doc, 'a').parent, null);
   assert.equal(doc.clips.length, 1);
   assert.equal(descendants(doc, 'a').size, 0);
+});
+
+test('the parts bin rides in the skeleton file and round-trips', () => {
+  const parts = [{ name: 'wing', src: 'data:img', w: 12, h: 8 }];
+  const text = packSkeletons([], parts);
+  const back = unpackSkeletons(text);
+  assert.deepEqual(back.parts, parts);
+  assert.deepEqual(back.skeletons, []);
+  // absent parts / junk entries are tolerated
+  assert.deepEqual(unpackSkeletons('{"version":1,"skeletons":{}}').parts, []);
+  assert.deepEqual(unpackSkeletons(JSON.stringify({ parts: [{ nope: 1 }] })).parts, []);
 });

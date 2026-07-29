@@ -23,7 +23,7 @@ import { boneScreen } from './rig';
 import { samplePose } from './sample';
 import { timelineFor, keyAt, clearKeyAt, prunedClips, countKeys, KEY_EPS } from './timeline';
 import { History } from './history.ts';
-import type { SkeletonDoc } from './skeleton.ts';
+import type { SkeletonDoc, SkelPart } from './skeleton.ts';
 import {
   SKEL_PREFIX, skelBodyId, isSkelBodyId, packSkeletons, unpackSkeletons,
   snapshotDoc, restoreDoc, clampJointAngle, boneById as skelBoneById,
@@ -33,7 +33,7 @@ import {
 } from './skeleton.ts';
 import { skeletonBody, preloadSkeleton } from './skeleton-render.ts';
 import { mountAssembly } from './assembly.ts';
-import type { AddBoneOpts, SkelBone } from './skeleton.ts';
+import type { AddBoneOpts, SkelBone, SkelAttachment } from './skeleton.ts';
 
 // ---------------------------------------------------------------------------
 // options + api
@@ -77,13 +77,13 @@ export interface StudioApi {
   addClip(name: string): string | null;
   renameClip(key: string, name: string): boolean;
   deleteClip(key: string): boolean;
-  patchClip(key: string, patch: { frames?: number; per?: number }): boolean;
+  patchClip(key: string, patch: { frames?: number; fps?: number }): boolean;
   // assembled characters
   skeletons(): { id: string; name: string; bones: number; clips: number }[];
   newSkeleton(name: string): string;
   deleteSkeleton(id: string): boolean;
   addSkelBone(docId: string, opts: AddBoneOpts & { imgSrc?: string; imgW?: number; imgH?: number }): string | null;
-  patchSkelBone(docId: string, boneId: string, patch: Partial<Pick<SkelBone, 'x' | 'y' | 'rot' | 'sx' | 'sy' | 'len' | 'z' | 'joint'>> & { name?: string; parent?: string | null }): boolean;
+  patchSkelBone(docId: string, boneId: string, patch: Partial<Pick<SkelBone, 'x' | 'y' | 'rot' | 'sx' | 'sy' | 'len' | 'z' | 'joint'>> & { name?: string; parent?: string | null; img?: Partial<SkelAttachment> }): boolean;
   saveSkeletons(): Promise<boolean>;
 }
 
@@ -129,15 +129,17 @@ const CSS = `
   border-radius:50%; cursor:pointer; }
 .as-helpbtn:hover { border-color:var(--accent); color:var(--ink); }
 
-.as-main, .asm-main { flex:1; display:grid; grid-template-columns:242px 1fr 282px; min-height:0; }
+.as-main, .asm-main { flex:1; display:grid; grid-template-columns:var(--as-leftw, 260px) 1fr 282px; min-height:0; }
 .as-col { min-height:0; overflow:hidden; display:flex; flex-direction:column; }
-.as-roster, .asm-left { border-right:1px solid var(--edge); background:var(--panel); }
+.as-roster, .asm-left { border-right:1px solid var(--edge); background:var(--panel); position:relative; overflow-x:hidden; }
+.as-vresize { position:absolute; top:0; right:0; width:7px; height:100%; cursor:col-resize; z-index:12; }
+.as-vresize:hover, .as-vresize.on { background:linear-gradient(90deg, transparent, rgba(115,239,247,0.3)); }
 .as-inspector, .asm-right { border-left:1px solid var(--edge); background:var(--panel); overflow-y:auto; }
 .as-pad { padding:10px; }
 .as-search { width:100%; padding:6px 8px; background:var(--panel2); border:1px solid var(--edge);
   color:var(--ink); border-radius:6px; font:inherit; }
 .as-search::placeholder { color:var(--dim); }
-.as-list { flex:1; overflow-y:auto; padding:4px; }
+.as-list { flex:1; overflow-y:auto; overflow-x:hidden; padding:4px; }
 .as-grp { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:1px;
   padding:8px 6px 3px; position:sticky; top:0; background:var(--panel); z-index:1; }
 .as-row { display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px; cursor:pointer; }
@@ -171,25 +173,65 @@ const CSS = `
 .as-clipedit { width:110px; padding:3px 8px; background:var(--panel2); border:1px solid var(--accent);
   color:var(--ink); border-radius:6px; font:inherit; }
 
-.as-tbar { display:flex; align-items:center; gap:8px; }
+.as-tbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .as-tbar button { padding:4px 9px; border:1px solid var(--edge); background:var(--panel2);
-  color:var(--ink); border-radius:6px; cursor:pointer; }
+  color:var(--ink); border-radius:6px; cursor:pointer; white-space:nowrap; flex:none; }
 .as-tbar button:hover:not(:disabled) { border-color:var(--accent); }
 .as-tbar button:disabled { opacity:.4; cursor:default; }
 .as-tbar button.play { background:var(--accent2); color:#0c0e17; border-color:var(--accent2); font-weight:600; }
 .as-scrub { flex:1; accent-color:var(--accent); }
 .as-tbar .fno { color:var(--dim); min-width:108px; text-align:right; font-variant-numeric:tabular-nums; }
 .as-app label.chk { display:inline-flex; align-items:center; gap:5px; color:var(--dim); cursor:pointer; }
+.as-rowlabel { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:1px; min-width:38px; flex:none; }
+.as-posebtn.on { background:var(--accent) !important; color:#0c0e17 !important; border-color:var(--accent) !important; font-weight:600; }
 
-.as-dope { display:flex; gap:2px; align-items:flex-end; height:26px; padding:0 2px; touch-action:none; }
-.as-dope .tick { flex:1; height:10px; border-radius:2px; background:var(--panel2); cursor:pointer;
-  border:1px solid transparent; min-width:6px; }
-.as-dope .tick:hover { background:var(--panel3); }
-.as-dope .tick.here { border-color:var(--accent); height:16px; }
-.as-dope .tick.key { background:var(--warn); height:14px; cursor:grab; }
-.as-dope .tick.key.here { border-color:var(--accent); height:18px; }
-.as-dope .tick.drop { border-color:var(--accent2); background:var(--panel3); height:18px; }
-.as-dope .tick.key.drop { background:var(--accent2); }
+.as-dope { display:flex; gap:3px; align-items:stretch; height:58px; padding:2px;
+  overflow-x:auto; overflow-y:hidden; touch-action:none; }
+.as-dope .fcell { position:relative; flex:none; background:var(--panel2); border:1px solid var(--edge);
+  border-radius:5px; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:2px 3px 11px; }
+.as-dope .fcell:hover { border-color:var(--accent); }
+.as-dope .fcell.here { border-color:var(--accent); background:var(--panel3); box-shadow:0 0 0 1px var(--accent); }
+.as-dope .fcell.key { border-color:var(--warn); cursor:grab; }
+.as-dope .fcell.drop { border-color:var(--accent2); box-shadow:0 0 0 1px var(--accent2); }
+.as-dope .fthumb { image-rendering:pixelated; pointer-events:none; }
+.as-dope .fno2 { position:absolute; bottom:0; left:3px; font-size:9px; color:var(--dim); pointer-events:none; }
+.as-dope .fkey { position:absolute; bottom:-1px; right:2px; font-size:10px; color:var(--warn);
+  display:none; pointer-events:none; text-shadow:0 1px 2px #000; }
+.as-dope .fcell.key .fkey { display:block; }
+.as-dope .fadd { position:absolute; top:1px; right:1px; width:15px; height:15px; line-height:12px;
+  font-size:9px; border-radius:4px; border:1px solid var(--edge); background:var(--panel3);
+  color:var(--accent2); opacity:0; cursor:pointer; padding:0; font:inherit; }
+.as-dope .fcell:hover .fadd { opacity:1; }
+.as-dope .fcell.key .fadd { color:var(--danger); }
+.as-dope .fcell.tween::after { content:""; position:absolute; left:2px; right:2px; bottom:12px;
+  height:2px; border-radius:1px; background:rgba(255,205,117,0.4); pointer-events:none; }
+.as-dope .fgrow { min-width:32px; color:var(--dim); font-size:14px; border-style:dashed; }
+.as-dope .fgrow:hover { color:var(--accent2); border-color:var(--accent2); }
+
+/* the timeline — keys (with their pose) at their true, freely-placed times */
+.as-timeline { position:relative; flex:1; height:64px; background:var(--panel2); border:1px solid var(--edge);
+  border-radius:6px; cursor:pointer; touch-action:none; }
+.as-timeline .ttick { position:absolute; top:6px; bottom:6px; width:1px; background:rgba(140,150,191,0.16);
+  pointer-events:none; }
+.as-timeline .tphead { position:absolute; top:0; bottom:0; width:2px; background:var(--accent);
+  pointer-events:none; box-shadow:0 0 6px rgba(115,239,247,0.7); z-index:5; }
+.as-timeline .tkeycard { position:absolute; bottom:2px; transform:translateX(-50%); display:flex;
+  flex-direction:column; align-items:center; gap:0; cursor:grab; z-index:2;
+  animation:as-kpop .16s ease; transition:transform .12s ease; }
+@keyframes as-kpop { from { transform:translateX(-50%) scale(.6); opacity:0; } }
+.as-timeline .tkeycard:hover { z-index:4; }
+.as-timeline .tkeycard.sel { z-index:3; }
+.as-timeline .tkeycard.dragging { transition:none; animation:none; transform:translateX(-50%) scale(1.12);
+  cursor:grabbing; z-index:6; filter:drop-shadow(0 4px 10px #000d); }
+.as-timeline .kthumb { image-rendering:pixelated; background:rgba(12,14,23,0.7); border:1px solid var(--edge);
+  border-radius:4px; pointer-events:none; }
+.as-timeline .tkeycard:hover .kthumb { border-color:var(--warn); }
+.as-timeline .tkeycard.sel .kthumb { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+.as-timeline .tkey { width:10px; height:10px; margin-top:-2px; background:var(--warn); border:1px solid #0c0e17;
+  transform:rotate(45deg); border-radius:2px; pointer-events:none; }
+.as-timeline .tkeycard.sel .tkey { background:var(--accent); }
+.as-rowtoggle { border:0; background:transparent; padding:0; cursor:pointer; text-align:left; }
+.as-rowtoggle:hover { color:var(--ink); }
 
 .as-sect { border-bottom:1px solid var(--edge); }
 .as-sect h3 { font-size:11px; color:var(--accent2); margin:0; padding:9px 10px 5px;
@@ -254,14 +296,27 @@ const CSS = `
 .asm-empty button { margin-top:10px; padding:7px 16px; border:1px solid var(--accent2); background:var(--panel2);
   color:var(--accent2); border-radius:7px; cursor:pointer; font:inherit; font-weight:600; }
 .asm-empty button:hover { background:var(--accent2); color:#0c0e17; }
-.asm-charlist { max-height:150px; overflow-y:auto; padding:2px 6px 8px; }
+.asm-charlist { max-height:150px; overflow-y:auto; overflow-x:hidden; padding:2px 6px 8px; }
 .asm-partsect { flex:1; display:flex; flex-direction:column; min-height:0; }
-.asm-partgrid { flex:1; overflow-y:auto; display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; padding:6px 10px; align-content:start; }
+.asm-partgrid { flex:1; overflow-y:auto; overflow-x:hidden; display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(84px, 1fr)); gap:6px; padding:6px 10px; align-content:start; }
 .asm-part { background:var(--panel2); border:1px solid var(--edge); border-radius:6px; padding:4px;
-  cursor:pointer; text-align:center; }
+  cursor:pointer; text-align:center; min-width:0; }
 .asm-part:hover { border-color:var(--accent2); }
 .asm-part img { width:100%; height:40px; object-fit:contain; image-rendering:pixelated; }
 .asm-partname { color:var(--dim); font-size:9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.asm-part { position:relative; }
+.asm-partrm { position:absolute; top:1px; right:1px; width:14px; height:14px; line-height:11px; padding:0;
+  font:inherit; font-size:9px; border-radius:4px; border:1px solid var(--edge); background:var(--panel3);
+  color:var(--dim); opacity:0; cursor:pointer; }
+.asm-part:hover .asm-partrm { opacity:1; }
+.asm-partrm:hover { color:var(--danger); border-color:var(--danger); }
+.asm-rowbtn { width:16px; height:16px; line-height:13px; padding:0; font:inherit; font-size:9px;
+  border-radius:4px; border:1px solid var(--edge); background:var(--panel3); color:var(--dim);
+  opacity:0; cursor:pointer; flex:none; }
+.as-row:hover .asm-rowbtn, .asm-treerow:hover .asm-rowbtn { opacity:1; }
+.asm-rowbtn:hover { color:var(--ink); border-color:var(--accent); }
+.asm-rowbtn.danger:hover { color:var(--danger); border-color:var(--danger); }
 .asm-tree { padding:2px 4px 8px; max-height:220px; overflow-y:auto; }
 .asm-treerow { display:flex; align-items:center; gap:6px; padding:2px 6px; border-radius:5px; cursor:pointer; color:var(--ink); }
 .asm-treerow:hover { background:var(--panel2); }
@@ -296,7 +351,7 @@ const SHELL = `
       <div class="as-boot" data-as="boot">baking the roster…</div>
     </div>
     <div class="as-transport">
-      <div class="as-clips" data-as="clips"></div>
+      <div class="as-tbar"><span class="as-rowlabel">clips</span><div class="as-clips" data-as="clips" style="flex:1"></div></div>
       <div class="as-tbar">
         <button class="play" data-as="playBtn" title="play / pause (Space)">▶ play</button>
         <button data-as="stepBack" title="previous frame (←)">◀</button>
@@ -312,18 +367,32 @@ const SHELL = `
         <a class="as-gif" data-as="gif" download="clip.gif" href="#" title="export the current clip as an animated GIF">⬇ export GIF</a>
       </div>
       <div class="as-tbar">
-        <label class="chk"><input type="checkbox" data-as="poseEdit" /> <b style="color:var(--accent)">pose edit</b></label>
+        <button class="as-posebtn" data-as="poseEdit" title="toggle pose editing: drag joints to pose, every drag keys the frame (P)">✎ pose edit</button>
         <button data-as="keyBtn" title="set a key at this frame (K)">◆ set key</button>
         <button data-as="unkeyBtn" title="clear the key at this frame (Del)">◇ clear</button>
         <button data-as="copyKey" title="copy the key at this frame">⧉ copy</button>
         <button data-as="pasteKey" title="paste the copied key at this frame">⧉ paste</button>
-        <span class="fno" data-as="keyInfo" style="min-width:150px;text-align:left">drag a joint to pose</span>
-        <span style="flex:1"></span>
-        <button data-as="undoA" title="undo (Ctrl+Z)">↶</button>
-        <button data-as="redoA" title="redo (Ctrl+Shift+Z)">↷</button>
-        <button data-as="resetClip" title="delete every key of this clip">reset clip</button>
+        <span class="fno" data-as="keyInfo" style="flex:1;min-width:90px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">drag a joint to pose</span>
+        <span style="display:flex;gap:8px;flex:none">
+          <button data-as="undoA" title="undo (Ctrl+Z)">↶</button>
+          <button data-as="redoA" title="redo (Ctrl+Shift+Z)">↷</button>
+          <button data-as="resetClip" title="delete every key of this clip">reset clip</button>
+        </span>
       </div>
-      <div class="as-dope" data-as="dope" title="keyframes on the clip timeline — drag a key to move it"></div>
+      <div class="as-tbar">
+        <span style="display:flex;flex-direction:column;gap:3px;flex:none;align-items:stretch">
+          <span class="as-rowlabel">keys</span>
+          <button class="as-mini" data-as="tAddKey" title="add a key at the playhead (K)">＋◆</button>
+          <button class="as-mini" data-as="tDelKey" title="delete the key at the playhead (Del)">－◆</button>
+        </span>
+        <div class="as-timeline" data-as="tline" title="the animation: ◆ keys with their pose, at any time — drag a key ANYWHERE (Shift = snap to frames) · double-click to add a key · click one to select and edit it · everything between keys is interpolation"></div>
+        <input type="number" data-as="tDur" min="60" max="16000" step="10" style="width:70px" title="total clip duration (ms)" />
+        <span class="as-rowlabel" style="min-width:18px">ms</span>
+      </div>
+      <div class="as-tbar">
+        <button class="as-rowlabel as-rowtoggle" data-as="framesToggle" title="show/hide the sampled frame grid (secondary — keys are the animation)">frames ▸</button>
+        <div class="as-dope as-hidden" data-as="dope" style="flex:1" title="the sampled frame grid the clip plays/exports at — ◆ marks on-frame keys, the amber line is the interpolated tween; hover a frame to key it, right-click for actions"></div>
+      </div>
     </div>
   </div>
   <div class="as-col as-inspector">
@@ -345,9 +414,11 @@ const SHELL = `
       <h3>Clip timing</h3>
       <div class="as-field"><label>duration (ms)</label>
         <input type="number" data-as="cDur" min="60" max="8000" step="10" style="width:78px" /></div>
+      <div class="as-field as-hidden" data-as="cFpsRow"><label>fps</label>
+        <input type="number" data-as="cFps" min="1" max="240" step="1" style="width:78px" /></div>
       <div class="as-field as-hidden" data-as="cFramesRow"><label>frames</label>
-        <input type="number" data-as="cFrames" min="1" max="120" step="1" style="width:78px" /></div>
-      <div class="as-field"><label>frames</label><span data-as="iFrames">—</span></div>
+        <input type="number" data-as="cFrames" min="1" max="600" step="1" style="width:78px" /></div>
+      <div class="as-field" data-as="iFramesRow"><label>frames</label><span data-as="iFrames">—</span></div>
     </div>
     <div class="as-sect">
       <h3>Keyframe</h3>
@@ -415,7 +486,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   const iSize = $<HTMLSpanElement>('iSize');
   const iInfo = $<HTMLDivElement>('iInfo');
   const iFrames = $<HTMLSpanElement>('iFrames');
-  const poseEditEl = $<HTMLInputElement>('poseEdit');
+  const poseEditEl = $<HTMLButtonElement>('poseEdit');
   const keyBtn = $<HTMLButtonElement>('keyBtn');
   const unkeyBtn = $<HTMLButtonElement>('unkeyBtn');
   const copyKeyBtn = $<HTMLButtonElement>('copyKey');
@@ -423,8 +494,12 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   const keyInfo = $<HTMLSpanElement>('keyInfo');
   const dopeEl = $<HTMLDivElement>('dope');
   const cDur = $<HTMLInputElement>('cDur');
+  const tlineEl = $<HTMLDivElement>('tline');
+  const tDur = $<HTMLInputElement>('tDur');
   const cFrames = $<HTMLInputElement>('cFrames');
   const cFramesRow = $<HTMLDivElement>('cFramesRow');
+  const cFps = $<HTMLInputElement>('cFps');
+  const cFpsRow = $<HTMLDivElement>('cFpsRow');
   const kEase = $<HTMLSelectElement>('kEase');
   const kCount = $<HTMLSpanElement>('kCount');
   const saveBtn = $<HTMLButtonElement>('saveBtn');
@@ -501,16 +576,35 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
         <kbd>Space</kbd><span>play / pause (Animate) · hold to pan (Assemble)</span>
         <kbd>← →</kbd><span>step a frame · nudge the selected bone (Assemble)</span>
         <kbd>Home / End</kbd><span>first / last frame</span>
+        <kbd>P</kbd><span>toggle ✎ pose edit</span>
         <kbd>K</kbd><span>set a key at this frame</span>
         <kbd>Del</kbd><span>clear the key (Animate) · delete the bone (Assemble)</span>
         <kbd>Ctrl+Z / Ctrl+Shift+Z</kbd><span>undo / redo</span>
         <kbd>B</kbd><span>add a bone under the selection (Assemble)</span>
         <kbd>N</kbd><span>new character (Assemble)</span>
-        <kbd>Shift</kbd><span>drag = move a skeleton joint · 15° rotation snap (Assemble)</span>
+        <kbd>Shift</kbd><span>drag = move a skeleton joint · snap a key to frames (timeline) · 15° snap (Assemble)</span>
         <kbd>?</kbd><span>this help</span>
       </div>
-      <p>Dope sheet: click a tick to jump, drag an amber key to move it.
-      Double-click an assembled body's clip tab to rename it; <b>⋯</b> duplicates or deletes it.</p>
+      <p><b>Frames vs keyframes:</b> <b>keyframes (◆) are the animation</b> —
+      the poses you author, at any times (spacing need not be uniform).
+      Everything between keys is interpolation (each key's ease shapes the
+      approach into it). Frames are just the sampled grid the clip plays and
+      exports at (tucked behind the <b>frames ▸</b> toggle). The <b>keys</b>
+      row is the timeline — each key shows its pose: drag it ANYWHERE
+      (hold Shift to snap to frames), double-click to add a key, ＋◆/－◆ to
+      key/unkey the playhead, click a key to select and edit it, and set the
+      clip's total duration in the ms box.</p>
+      <p><b>Building an animation from scratch:</b> pick a body (or press
+      ▶ animate on an assembled character) → choose or <b>+ new clip</b> →
+      turn on <b>✎ pose edit</b> → step to a frame → drag joints (every drag
+      keys that frame) → pose more frames → Space to review. On the filmstrip:
+      hover a frame and press its <b>◆</b> (or double-click) to key it, drag a
+      key to retime it — <b>drop it on another key to swap the two</b> —
+      right-click for copy/paste/duplicate, and <b>＋</b> grows an assembled
+      clip.</p>
+      <p>Double-click an assembled body's clip tab to rename it; <b>⋯</b>
+      duplicates or deletes it. The frames + duration fields in the inspector
+      retime the clip (existing keys snap to the new frame grid).</p>
       <div class="btns"><button class="ok">close</button></div>`;
     mboxEl.querySelector<HTMLButtonElement>('.ok')!.onclick = () => closeModal(false);
     modalEl.classList.remove('as-hidden');
@@ -565,7 +659,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   // -------------------------------------------------------------------------
   const skelEndpoint = host.skeletons ? (host.skeletons.endpoint ?? '/__anim/skeletons') : null;
   const SKEL_LS = 'anim-studio:skeletons';
-  async function loadSkeletonDocs(): Promise<SkeletonDoc[]> {
+  async function loadSkeletonDocs(): Promise<{ skeletons: SkeletonDoc[]; parts: SkelPart[] }> {
     if (skelEndpoint) {
       try {
         const res = await fetch(skelEndpoint, { headers: { accept: 'application/json' } });
@@ -577,7 +671,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     try {
       return unpackSkeletons(localStorage.getItem(SKEL_LS) ?? '{}');
     } catch {
-      return [];
+      return { skeletons: [], parts: [] };
     }
   }
   let skelTimer: ReturnType<typeof setTimeout> | undefined;
@@ -587,7 +681,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     skelTimer = setTimeout(() => void saveSkeletonDocs(), 600);
   }
   async function saveSkeletonDocs(): Promise<boolean> {
-    const text = packSkeletons(docs);
+    const text = packSkeletons(docs, skelParts);
     if (skelEndpoint) {
       try {
         const res = await fetch(skelEndpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: text });
@@ -612,7 +706,9 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     }
   }
 
-  const docs: SkeletonDoc[] = await loadSkeletonDocs();
+  const skelFile = await loadSkeletonDocs();
+  const docs: SkeletonDoc[] = skelFile.skeletons;
+  const skelParts: SkelPart[] = skelFile.parts;
   for (const doc of docs) store[skelBodyId(doc)] = doc.timelines;
   const skelRev = new Map<string, number>();
 
@@ -731,6 +827,14 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   let clipIdx = 0;
   let frameIdx = 0;
   let poseMode = false;
+  let poseWanted = false; // the user's toggle; poseMode = poseWanted && poseable
+  /** Continuous clip-time selected on the timeline (a key's exact time, which
+   *  may sit between frames) — pose/key ops target it; null = the frame's t. */
+  let curT: number | null = null;
+  /** Continuous playback clock for assembled bodies (they interpolate every
+   *  displayed frame instead of stepping baked samples). */
+  let playMs = 0;
+  let playT: number | null = null;
   let handles: { bone: BoneRec; x: number; y: number }[] = [];
   let lastView = { dx: 0, dy: 0, scale: 1 };
   let keyClipboard: { pose: Pose; ease?: Ease } | null = null;
@@ -775,14 +879,33 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     return clip.delays;
   }
 
-  /** The plan entry (authored clip id + clip-time) at the current frame. */
+  /** The authoring target: authored clip id + clip-time + render frame. The
+   *  time is the timeline-selected `curT` when set (so ops hit a key's exact,
+   *  possibly off-frame time), else the current frame's plan time. */
   function curDrive(): { clip: string; t: number; fi: number } | null {
     const clip = activeClip();
     if (!current || !clip) return null;
     const fi = clip.frames[frameIdx] ?? clip.frames[0];
     const pf = current.body.plan[fi];
     if (!pf) return null;
-    return { clip: pf.clip, t: pf.t, fi };
+    return { clip: pf.clip, t: curT ?? pf.t, fi };
+  }
+
+  /** Clip-time of frame `i` of the active clip. */
+  function frameT(i: number): number {
+    const clip = activeClip();
+    if (!current || !clip) return 0;
+    return current.body.plan[clip.frames[i] ?? -1]?.t ?? 0;
+  }
+
+  /** Jump the playhead to a continuous time (nearest frame renders it). */
+  function seekT(t: number): void {
+    const clip = activeClip();
+    if (!clip) return;
+    curT = t;
+    const n = clip.frames.length;
+    frameIdx = n <= 1 ? 0 : Math.max(0, Math.min(n - 1, Math.round(t * (n - 1))));
+    render();
   }
 
   // -------------------------------------------------------------------------
@@ -804,6 +927,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
       }
     }
     if (isSkelBodyId(bodyId)) scheduleSkelSave();
+    dopeRev++;
     render();
   }
   /** Run a clip-store mutation with an undo entry (no-op edits push nothing). */
@@ -814,6 +938,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     if (before !== after) {
       history.push({ label, undo: () => restoreClips(bodyId, before), redo: () => restoreClips(bodyId, after) });
       if (isSkelBodyId(bodyId)) scheduleSkelSave();
+      dopeRev++;
     }
   }
 
@@ -835,6 +960,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const body = skeletonBody(doc, store);
     const baked = { body, bounds: contentBounds(body) };
     current = baked;
+    dopeRev++; // structure changed → rebuild the filmstrip
     bakeCache.set(skelCacheKey(doc), Promise.resolve(baked));
     clipIdx = Math.max(0, body.clips.findIndex((c) => c.clipKey === want));
     const clip = activeClip();
@@ -914,13 +1040,24 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     drawGuides(bounds, dx, dy, scale, fw);
 
     const fi = clip.frames[frameIdx] ?? clip.frames[0];
-    if (onionEl.checked && clip.frames.length > 1) {
-      const prev = clip.frames[(frameIdx - 1 + clip.frames.length) % clip.frames.length];
-      const next = clip.frames[(frameIdx + 1) % clip.frames.length];
-      blit(prev, scale, dx, dy, 0.2);
-      blit(next, scale, dx, dy, 0.2);
+    if (playT !== null && playing && current.body.renderPose && curDoc()) {
+      // assembled bodies play CONTINUOUSLY: sample the keys at the exact
+      // elapsed time — frames are just the export grid, keys are the motion
+      const bodyId = current.body.bodyId!;
+      const posed = current.body.renderPose(fi, samplePose(store[bodyId]?.[clip.clipKey], playT));
+      if (posed) {
+        pctx.imageSmoothingEnabled = false;
+        pctx.drawImage(posed.canvas, 0, 0, posed.fw, posed.fh, dx, dy, posed.fw * scale, posed.fh * scale);
+      }
+    } else {
+      if (onionEl.checked && clip.frames.length > 1) {
+        const prev = clip.frames[(frameIdx - 1 + clip.frames.length) % clip.frames.length];
+        const next = clip.frames[(frameIdx + 1) % clip.frames.length];
+        blit(prev, scale, dx, dy, 0.2);
+        blit(next, scale, dx, dy, 0.2);
+      }
+      blit(fi, scale, dx, dy, 1);
     }
-    blit(fi, scale, dx, dy, 1);
 
     hudEl.textContent = `${clip.name}  ·  frame ${fi}  ·  ${bounds.w}×${bounds.h}px  ·  ${scale}×`;
     fnoEl.textContent = `frame ${frameIdx + 1} / ${clip.frames.length}`;
@@ -972,6 +1109,18 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     if (poseMode && poseable()) renderPoseMode();
     else renderBaked();
     updateKeyUI();
+  }
+
+  function setPoseMode(on: boolean): void {
+    poseWanted = on;
+    poseMode = on && poseable();
+    poseEditEl.disabled = !poseable();
+    poseEditEl.title = poseable()
+      ? 'toggle pose editing: drag joints to pose, every drag keys the frame (P)'
+      : 'this body has no pose rig (view only)';
+    poseEditEl.classList.toggle('on', poseMode);
+    previewEl.classList.toggle('posing', poseMode);
+    render();
   }
 
   // responsive preview: fill the stage, re-render on resize
@@ -1071,6 +1220,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
       off.dAng = next;
     }
     render();
+    refreshDopeThumb(frameIdx); // live filmstrip feedback while dragging
   });
 
   function endDrag(e: PointerEvent): void {
@@ -1088,6 +1238,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
       const before = d.histBefore;
       history.push({ label: 'pose ' + d.bone.id, undo: () => restoreClips(bodyId, before), redo: () => restoreClips(bodyId, after) });
       if (isSkelBodyId(bodyId)) scheduleSkelSave();
+      dopeRev++;
     }
     render();
   }
@@ -1104,44 +1255,167 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
 
   let keyDrag: { from: number; to: number } | null = null;
 
-  function renderDope(): void {
+  // The frames strip is SECONDARY (keys are the animation; frames just sample
+  // it) — collapsed by default behind a disclosure toggle.
+  const FRAMES_LS = 'anim-studio:frames-open';
+  let framesOpen = localStorage.getItem(FRAMES_LS) === '1';
+
+  // The dope sheet is a FILMSTRIP: every frame cell shows the character as it
+  // renders at that frame (live-sampled, so edits show immediately), with a ◆
+  // badge on keyed frames. Rebuilding thumbnails is the expensive part, so the
+  // strip is cached and rebuilt only when the body/clip/keys change; the
+  // playhead highlight updates per tick for free.
+  let dopeRev = 0; // bump on any authored-keys change → thumbnails rebuild
+  let dopeKey = '';
+  let dopeCells: HTMLDivElement[] = [];
+
+  function drawThumb(cv: HTMLCanvasElement, fi: number): void {
+    if (!current) return;
+    const b = current.bounds;
+    const s = Math.min(40 / b.h, 60 / b.w);
+    cv.width = Math.max(18, Math.round(b.w * s));
+    cv.height = 40;
+    const r = current.body.frame(fi);
+    if (!r) return;
+    const cx = cv.getContext('2d')!;
+    cx.imageSmoothingEnabled = false;
+    cx.drawImage(r.src, r.x + b.x, r.y + b.y, b.w, b.h, (cv.width - b.w * s) / 2, (40 - b.h * s) / 2, b.w * s, b.h * s);
+  }
+
+  function rebuildDope(clip: ClipDef): void {
     dopeEl.innerHTML = '';
-    const clip = activeClip();
-    if (!current || !clip) return;
+    dopeCells = [];
+    if (!current) return;
+    if (clip.frames.length > 96) {
+      const note = document.createElement('div');
+      note.className = 'as-note';
+      note.textContent = `${clip.frames.length} frames — too dense to strip; author on the keys timeline (lower the fps to see a strip)`;
+      dopeEl.appendChild(note);
+      return;
+    }
     const bodyId = current.body.bodyId;
+    const keyedIdx: number[] = [];
     clip.frames.forEach((fi, i) => {
       const pf = current?.body.plan[fi];
       if (!pf) return;
       const tl = bodyId ? store[bodyId]?.[pf.clip] : undefined;
       const keyed = !!tl?.keys.some((kf) => Math.abs(kf.t - pf.t) < KEY_EPS);
-      const el = document.createElement('div');
-      el.className = 'tick' + (keyed ? ' key' : '') + (i === frameIdx ? ' here' : '');
-      el.dataset.i = String(i);
-      el.title = `frame ${i + 1}` + (keyed ? ' · keyed — drag to move' : '');
-      dopeEl.appendChild(el);
+      if (keyed) keyedIdx.push(i);
+      const cell = document.createElement('div');
+      cell.className = 'fcell' + (keyed ? ' key' : '');
+      cell.dataset.i = String(i);
+      cell.title = keyed
+        ? `frame ${i + 1} ◆ keyframe — drag to retime · drop on a key to swap · right-click for actions`
+        : `frame ${i + 1} — click to jump · ◆ or double-click to set a key · right-click for actions`;
+      const cv = document.createElement('canvas');
+      cv.className = 'fthumb';
+      drawThumb(cv, fi);
+      const no = document.createElement('span');
+      no.className = 'fno2';
+      no.textContent = String(i + 1);
+      const badge = document.createElement('span');
+      badge.className = 'fkey';
+      badge.textContent = '◆';
+      const act = document.createElement('button');
+      act.className = 'fadd';
+      act.textContent = keyed ? '✕' : '◆';
+      act.title = keyed ? 'clear this key' : 'set a key at this frame';
+      act.onpointerdown = (ev) => ev.stopPropagation();
+      act.onclick = (ev) => {
+        ev.stopPropagation();
+        if (keyed) void clearKeyAtFrame(i);
+        else void setKeyAtFrame(i);
+      };
+      cell.ondblclick = () => {
+        if (!keyed) void setKeyAtFrame(i);
+      };
+      cell.oncontextmenu = (ev) => {
+        ev.preventDefault();
+        openCellMenu(i, cell);
+      };
+      cell.append(cv, no, badge, act);
+      dopeCells.push(cell);
+      dopeEl.appendChild(cell);
     });
+    // mark the interpolated span between consecutive keys — the tween the
+    // sampler fills in at playback
+    for (let k = 0; k + 1 < keyedIdx.length; k++) {
+      for (let i = keyedIdx[k] + 1; i < keyedIdx[k + 1]; i++) {
+        dopeCells[i]?.classList.add('tween');
+        if (dopeCells[i]) dopeCells[i].title += ' · interpolated between keys';
+      }
+    }
+    // assembled clips can grow/shrink right from the strip
+    const doc = curDoc();
+    if (doc) {
+      if (clip.frames.length > 1) {
+        const shrink = document.createElement('div');
+        shrink.className = 'fcell fgrow';
+        shrink.textContent = '－';
+        shrink.title = 'remove the last frame (keys snap to the new grid)';
+        shrink.onclick = () => {
+          withDocHistory(doc, 'remove frame', () => skelPatchClip(doc, clip.clipKey, { frames: clip.frames.length - 1 }));
+          frameIdx = Math.min(frameIdx, Math.max(0, (activeClip()?.frames.length ?? 1) - 1));
+          render();
+        };
+        dopeEl.appendChild(shrink);
+      }
+      const grow = document.createElement('div');
+      grow.className = 'fcell fgrow';
+      grow.textContent = '＋';
+      grow.title = 'add a frame to this clip (existing keys snap to the new grid)';
+      grow.onclick = () => {
+        withDocHistory(doc, 'add frame', () => skelPatchClip(doc, clip.clipKey, { frames: clip.frames.length + 1 }));
+        frameIdx = Math.max(0, (activeClip()?.frames.length ?? 1) - 1);
+        render();
+      };
+      dopeEl.appendChild(grow);
+    }
+  }
+
+  function renderDope(): void {
+    const clip = activeClip();
+    if (!current || !clip || !framesOpen) {
+      dopeEl.innerHTML = '';
+      dopeKey = '';
+      return;
+    }
+    const key = `${roster[selected]?.id}|${clipIdx}|${clip.frames.length}|${dopeRev}`;
+    if (key !== dopeKey) {
+      rebuildDope(clip);
+      dopeKey = key;
+    }
+    dopeCells.forEach((c, i) => c.classList.toggle('here', i === frameIdx));
+  }
+
+  /** Redraw one cell's thumbnail (live feedback while dragging a joint). */
+  function refreshDopeThumb(i: number): void {
+    const clip = activeClip();
+    const cv = dopeCells[i]?.querySelector<HTMLCanvasElement>('.fthumb');
+    if (clip && cv) drawThumb(cv, clip.frames[i] ?? 0);
   }
 
   function dopeIndexAt(clientX: number): number | null {
-    const ticks = [...dopeEl.querySelectorAll<HTMLElement>('.tick')];
-    if (!ticks.length) return null;
-    for (const t of ticks) {
+    if (!dopeCells.length) return null;
+    for (const t of dopeCells) {
       const r = t.getBoundingClientRect();
-      if (clientX >= r.left - 1 && clientX <= r.right + 1) return Number(t.dataset.i);
+      if (clientX >= r.left - 2 && clientX <= r.right + 2) return Number(t.dataset.i);
     }
-    return clientX < ticks[0].getBoundingClientRect().left ? Number(ticks[0].dataset.i) : Number(ticks[ticks.length - 1].dataset.i);
+    return clientX < dopeCells[0].getBoundingClientRect().left ? Number(dopeCells[0].dataset.i) : Number(dopeCells[dopeCells.length - 1].dataset.i);
   }
 
   dopeEl.addEventListener('pointerdown', (e) => {
-    const t = (e.target as HTMLElement).closest<HTMLElement>('.tick');
+    const t = (e.target as HTMLElement).closest<HTMLElement>('.fcell');
     if (!t) return;
     const i = Number(t.dataset.i);
     setPlaying(false);
+    if (!Number.isFinite(i)) return; // the ＋ grow cell handles its own click
     if (t.classList.contains('key') && poseable()) {
       keyDrag = { from: i, to: i };
       dopeEl.setPointerCapture(e.pointerId);
     } else {
       frameIdx = i;
+      curT = null;
       render();
     }
   });
@@ -1150,7 +1424,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const i = dopeIndexAt(e.clientX);
     if (i === null || i === keyDrag.to) return;
     keyDrag.to = i;
-    dopeEl.querySelectorAll<HTMLElement>('.tick').forEach((t) => t.classList.toggle('drop', Number(t.dataset.i) === i));
+    dopeCells.forEach((t) => t.classList.toggle('drop', Number(t.dataset.i) === i));
   });
   function endKeyDrag(e: PointerEvent): void {
     if (!keyDrag) return;
@@ -1163,15 +1437,190 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     }
     if (from === to) {
       frameIdx = from;
+      curT = null;
       render();
-    } else if (moveKeyOp(from, to)) {
-      toast(`key moved to frame ${to + 1}`);
-    } else {
+    } else if (!moveKeyOp(from, to)) {
       render();
     }
   }
   dopeEl.addEventListener('pointerup', endKeyDrag);
   dopeEl.addEventListener('pointercancel', endKeyDrag);
+
+  // -------------------------------------------------------------------------
+  // the timeline — keys at their true times, freely draggable
+  // -------------------------------------------------------------------------
+  const tpos = (t: number): string => `calc(8px + ${t.toFixed(5)} * (100% - 16px))`;
+
+  /** Thumbnail of the pose AT a key's exact time — the keyframe made visible. */
+  function drawKeyThumb(cv: HTMLCanvasElement, t: number): void {
+    const clip = activeClip();
+    const bodyId = current?.body.bodyId;
+    if (!current?.body.renderPose || !clip || !bodyId) return;
+    const b = current.bounds;
+    const s = Math.min(38 / b.h, 54 / b.w);
+    cv.width = Math.max(16, Math.round(b.w * s));
+    cv.height = 38;
+    const n = clip.frames.length;
+    const fi = clip.frames[n <= 1 ? 0 : Math.round(t * (n - 1))] ?? 0;
+    const posed = current.body.renderPose(fi, samplePose(store[bodyId]?.[clip.clipKey], t));
+    if (!posed) return;
+    const cx = cv.getContext('2d')!;
+    cx.imageSmoothingEnabled = false;
+    cx.drawImage(posed.canvas, b.x, b.y, b.w, b.h, (cv.width - b.w * s) / 2, (38 - b.h * s) / 2, b.w * s, b.h * s);
+  }
+
+  let tlineKey = '';
+  function renderTimeline(): void {
+    const clip = activeClip();
+    const bodyId = current?.body.bodyId;
+    if (!clip || !bodyId || !poseable()) {
+      tlineEl.innerHTML = '';
+      tlineKey = '';
+      return;
+    }
+    const n = clip.frames.length;
+    const rebuildKey = `${roster[selected]?.id}|${clipIdx}|${n}|${dopeRev}`;
+    if (rebuildKey !== tlineKey) {
+      tlineEl.innerHTML = '';
+      const step = Math.max(1, Math.ceil(n / 60)); // don't wallpaper dense grids
+      for (let i = 0; i < n; i += step) {
+        const d = document.createElement('div');
+        d.className = 'ttick';
+        d.style.left = tpos(n <= 1 ? 0 : i / (n - 1));
+        tlineEl.appendChild(d);
+      }
+      const ph = document.createElement('div');
+      ph.className = 'tphead';
+      tlineEl.appendChild(ph);
+      const dur = clipDurationMs();
+      for (const k of store[bodyId]?.[clip.clipKey]?.keys ?? []) {
+        const card = document.createElement('div');
+        card.className = 'tkeycard';
+        card.style.left = tpos(k.t);
+        card.dataset.t = String(k.t);
+        card.title = `◆ key @ ${Math.round(k.t * dur)}ms (t=${k.t.toFixed(3)}) — drag ANYWHERE to retime (Shift = snap to frames) · click to select · right-click for actions`;
+        const cv = document.createElement('canvas');
+        cv.className = 'kthumb';
+        drawKeyThumb(cv, k.t);
+        const dia = document.createElement('div');
+        dia.className = 'tkey';
+        card.append(cv, dia);
+        tlineEl.appendChild(card);
+      }
+      tlineKey = rebuildKey;
+    }
+    tlineEl.querySelectorAll<HTMLElement>('.tkeycard').forEach((c) => {
+      c.classList.toggle('sel', curT !== null && Math.abs(Number(c.dataset.t) - curT) < KEY_EPS);
+    });
+    const ph = tlineEl.querySelector<HTMLDivElement>('.tphead');
+    if (ph) ph.style.left = tpos(playT ?? curT ?? frameT(frameIdx));
+  }
+
+  function tlineT(e: { clientX: number }): number {
+    const r = tlineEl.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (e.clientX - r.left - 8) / Math.max(1, r.width - 16)));
+  }
+
+  /** Keys live at ANY time — free placement is the default; `snap` (Shift)
+   *  quantises to the frame grid on request. */
+  function snapT(t: number, snap: boolean): number {
+    const clip = activeClip();
+    if (!clip) return t;
+    const n = clip.frames.length;
+    if (n <= 1) return 0;
+    return snap ? Math.round(t * (n - 1)) / (n - 1) : t;
+  }
+
+  let tDrag: { key: Keyframe; tl: NonNullable<ReturnType<typeof timelineFor>>; bodyId: string; before: string | null; moved: boolean; card: HTMLElement } | null = null;
+  let tScrub = false;
+
+  tlineEl.addEventListener('pointerdown', (e) => {
+    const bodyId = current?.body.bodyId;
+    const clip = activeClip();
+    if (!bodyId || !clip || !poseable()) return;
+    setPlaying(false);
+    tlineEl.setPointerCapture(e.pointerId);
+    const kEl = (e.target as HTMLElement).closest<HTMLElement>('.tkeycard');
+    const tl = store[bodyId]?.[clip.clipKey];
+    if (kEl && tl) {
+      const t0 = Number(kEl.dataset.t);
+      const key = tl.keys.find((k) => Math.abs(k.t - t0) < KEY_EPS);
+      if (key) {
+        tDrag = { key, tl, bodyId, before: snapshotClips(bodyId), moved: false, card: kEl };
+        kEl.classList.add('dragging');
+        seekT(key.t);
+        return;
+      }
+    }
+    tScrub = true;
+    seekT(tlineT(e));
+  });
+  tlineEl.addEventListener('pointermove', (e) => {
+    if (tDrag) {
+      const t = snapT(tlineT(e), e.shiftKey);
+      const clash = tDrag.tl.keys.some((k) => k !== tDrag!.key && Math.abs(k.t - t) < KEY_EPS);
+      if (!clash) {
+        tDrag.key.t = t;
+        tDrag.tl.keys.sort((a, b) => a.t - b.t);
+        tDrag.moved = true;
+        tDrag.card.style.left = tpos(t);
+        tDrag.card.dataset.t = String(t);
+        seekT(t);
+      }
+      return;
+    }
+    if (tScrub) seekT(tlineT(e));
+  });
+  function endTline(e: PointerEvent): void {
+    try {
+      tlineEl.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    tScrub = false;
+    if (!tDrag) return;
+    const d = tDrag;
+    tDrag = null;
+    d.card.classList.remove('dragging');
+    const after = snapshotClips(d.bodyId);
+    if (d.moved && after !== d.before) {
+      const bodyId = d.bodyId;
+      const before = d.before;
+      history.push({ label: 'retime key', undo: () => restoreClips(bodyId, before), redo: () => restoreClips(bodyId, after) });
+      if (isSkelBodyId(bodyId)) scheduleSkelSave();
+      dopeRev++;
+      render();
+    }
+  }
+  tlineEl.addEventListener('pointerup', endTline);
+  tlineEl.addEventListener('pointercancel', endTline);
+
+  tlineEl.addEventListener('dblclick', (e) => {
+    const bodyId = current?.body.bodyId;
+    const clip = activeClip();
+    if (!bodyId || !clip || !poseable()) return;
+    const t = snapT(tlineT(e), e.shiftKey);
+    withClipsHistory('add key', bodyId, () => {
+      keyAt(timelineFor(store, bodyId, clip.clipKey, true)!, t, true, (kEase.value as Ease) || 'linear');
+    });
+    seekT(t);
+    if (!poseMode) setPoseMode(true);
+  });
+
+  tlineEl.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const kEl = (e.target as HTMLElement).closest<HTMLElement>('.tkeycard');
+    if (!kEl || !poseable()) return;
+    const t = Number(kEl.dataset.t);
+    seekT(t);
+    const items: { label: string; danger?: boolean; run: () => void }[] = [
+      { label: '⧉ copy key', run: () => void copyKeyOp(t) },
+    ];
+    if (keyClipboard) items.push({ label: '⧉ paste here (replace)', run: () => void pasteKeyOp(t) });
+    items.push({ label: '◆ duplicate → next slot', run: () => void duplicateKeyAtT(t) });
+    items.push({ label: '✕ delete key', danger: true, run: () => void clearKeyAtT(t) });
+    openMenu(items, kEl);
+  });
 
   // -------------------------------------------------------------------------
   // keyframe CRUD ops
@@ -1187,28 +1636,110 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     return tl && key ? { tl, key, t: pf.t } : null;
   }
 
+  /** Move a key to an empty frame, or SWAP it with the key already there —
+   *  dragging keys around the strip reorders them without losing either pose. */
   function moveKeyOp(fromI: number, toI: number): boolean {
     const clip = activeClip();
     const bodyId = current?.body.bodyId;
-    if (!clip || !bodyId || !current) return false;
+    if (!clip || !bodyId || !current || fromI === toI) return false;
     const src = keyAtFrame(fromI);
+    const dst = keyAtFrame(toI);
     const pfTo = current.body.plan[clip.frames[toI] ?? -1];
     if (!src || !pfTo) return false;
-    withClipsHistory('move key', bodyId, () => {
-      clearKeyAt(src.tl, pfTo.t);
-      clearKeyAt(src.tl, src.t);
-      src.tl.keys.push({ ...src.key, t: pfTo.t });
+    const srcT = src.t;
+    withClipsHistory(dst ? 'swap keys' : 'move key', bodyId, () => {
+      if (dst) {
+        src.key.t = dst.t;
+        dst.key.t = srcT;
+      } else {
+        clearKeyAt(src.tl, srcT);
+        src.tl.keys.push({ ...src.key, t: pfTo.t });
+      }
       src.tl.keys.sort((a, b) => a.t - b.t);
     });
     frameIdx = toI;
+    curT = null;
+    render();
+    toast(dst ? `keys ${fromI + 1} ⇄ ${toI + 1} swapped` : `key moved to frame ${toI + 1}`);
+    return true;
+  }
+
+  function setKeyAtFrame(i: number): boolean {
+    const clip = activeClip();
+    const bodyId = current?.body.bodyId;
+    const pf = current?.body.plan[clip?.frames[i] ?? -1];
+    if (!clip || !bodyId || !pf) return false;
+    setPlaying(false); // land ON the keyed frame, not a moving playhead
+    withClipsHistory('set key', bodyId, () => {
+      keyAt(timelineFor(store, bodyId, pf.clip, true)!, pf.t, true, (kEase.value as Ease) || 'linear');
+    });
+    frameIdx = i;
+    curT = null;
+    if (!poseMode) setPoseMode(true); // keying implies posing — show the joints
+    else render();
+    return true;
+  }
+
+  function clearKeyAtFrame(i: number): boolean {
+    const hit = keyAtFrame(i);
+    const bodyId = current?.body.bodyId;
+    if (!hit || !bodyId) return false;
+    setPlaying(false);
+    withClipsHistory('clear key', bodyId, () => clearKeyAt(hit.tl, hit.t));
     render();
     return true;
   }
 
-  function copyKeyOp(): boolean {
-    const hit = keyAtFrame(frameIdx);
+  /** The key at continuous time `t` in the active clip's timeline. */
+  function keyAtT(t: number): { tl: NonNullable<ReturnType<typeof timelineFor>>; key: Keyframe } | null {
+    const clip = activeClip();
+    const bodyId = current?.body.bodyId;
+    if (!clip || !bodyId) return null;
+    const tl = store[bodyId]?.[clip.clipKey];
+    const key = tl?.keys.find((kf) => Math.abs(kf.t - t) < KEY_EPS);
+    return tl && key ? { tl, key } : null;
+  }
+
+  function clearKeyAtT(t: number): boolean {
+    const hit = keyAtT(t);
+    const bodyId = current?.body.bodyId;
+    if (!hit || !bodyId) return false;
+    setPlaying(false);
+    withClipsHistory('clear key', bodyId, () => clearKeyAt(hit.tl, t));
+    if (curT !== null && Math.abs(curT - t) < KEY_EPS) curT = null;
+    render();
+    return true;
+  }
+
+  /** Duplicate the key at `t` one frame-slot later (replacing any occupant). */
+  function duplicateKeyAtT(t: number): boolean {
+    const clip = activeClip();
+    const bodyId = current?.body.bodyId;
+    const hit = keyAtT(t);
+    if (!clip || !bodyId || !hit) return false;
+    const n = clip.frames.length;
+    const t2 = Math.min(1, t + (n <= 1 ? 0.25 : 1 / (n - 1)));
+    if (Math.abs(t2 - t) < KEY_EPS) {
+      toast('no room after this key');
+      return false;
+    }
+    setPlaying(false);
+    const clone = JSON.parse(JSON.stringify({ pose: hit.key.pose, ease: hit.key.ease })) as { pose: Pose; ease?: Ease };
+    withClipsHistory('duplicate key', bodyId, () => {
+      clearKeyAt(hit.tl, t2);
+      hit.tl.keys.push({ t: t2, ease: clone.ease, pose: clone.pose });
+      hit.tl.keys.sort((a, b) => a.t - b.t);
+    });
+    seekT(t2);
+    return true;
+  }
+
+  function copyKeyOp(t?: number): boolean {
+    const d = curDrive();
+    const tt = t ?? d?.t;
+    const hit = tt !== undefined ? keyAtT(tt) : null;
     if (!hit) {
-      toast('no key at this frame');
+      toast('no key at this time');
       return false;
     }
     keyClipboard = JSON.parse(JSON.stringify({ pose: hit.key.pose, ease: hit.key.ease })) as { pose: Pose; ease?: Ease };
@@ -1216,43 +1747,80 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     return true;
   }
 
-  function pasteKeyOp(): boolean {
+  function pasteKeyOp(t?: number): boolean {
     const d = curDrive();
+    const clip = activeClip();
     const bodyId = current?.body.bodyId;
-    if (!keyClipboard || !d || !bodyId || !poseable()) {
+    const tt = t ?? d?.t;
+    if (!keyClipboard || tt === undefined || !clip || !bodyId || !poseable()) {
       if (!keyClipboard) toast('nothing copied yet');
       return false;
     }
-    const clip = JSON.parse(JSON.stringify(keyClipboard)) as { pose: Pose; ease?: Ease };
+    setPlaying(false);
+    const clone = JSON.parse(JSON.stringify(keyClipboard)) as { pose: Pose; ease?: Ease };
     withClipsHistory('paste key', bodyId, () => {
-      const tl = timelineFor(store, bodyId, d.clip, true)!;
-      clearKeyAt(tl, d.t);
-      tl.keys.push({ t: d.t, ease: clip.ease, pose: clip.pose });
+      const tl = timelineFor(store, bodyId, clip.clipKey, true)!;
+      clearKeyAt(tl, tt);
+      tl.keys.push({ t: tt, ease: clone.ease, pose: clone.pose });
       tl.keys.sort((a, b) => a.t - b.t);
     });
-    render();
+    seekT(tt);
     toast('key pasted');
     return true;
   }
 
+  function openCellMenu(i: number, anchor: HTMLElement): void {
+    const keyed = !!keyAtFrame(i);
+    const t = frameT(i);
+    const items: { label: string; danger?: boolean; run: () => void }[] = [];
+    if (keyed) {
+      items.push({ label: '⧉ copy key', run: () => void copyKeyOp(t) });
+      if (keyClipboard) items.push({ label: '⧉ paste here (replace)', run: () => void pasteKeyOp(t) });
+      items.push({ label: '◆ duplicate → next frame', run: () => void duplicateKeyAtT(t) });
+      items.push({ label: '✕ clear key', danger: true, run: () => void clearKeyAtFrame(i) });
+    } else {
+      items.push({ label: '◆ set key here', run: () => void setKeyAtFrame(i) });
+      if (keyClipboard) items.push({ label: '⧉ paste key here', run: () => void pasteKeyOp(t) });
+    }
+    openMenu(items, anchor);
+  }
+
   function updateKeyUI(): void {
     const bodyId = current?.body.bodyId;
-    if (!poseable() || !bodyId) {
+    const can = poseable() && !!bodyId;
+    for (const b of [keyBtn, unkeyBtn, copyKeyBtn, pasteKeyBtn]) b.disabled = !can;
+    kEase.disabled = !can;
+    tDur.disabled = !can;
+    $<HTMLButtonElement>('tAddKey').disabled = !can;
+    $<HTMLButtonElement>('tDelKey').disabled = !can || !keyAtT(curDrive()?.t ?? -1);
+    if (!can) {
       dopeEl.innerHTML = '';
+      dopeKey = '';
+      renderTimeline();
       keyInfo.textContent = current && !poseable() ? 'this body has no pose rig (view only)' : '';
       kCount.textContent = '0';
       return;
     }
     renderDope();
+    renderTimeline();
     const d = curDrive();
     if (!d) return;
-    const tl = store[bodyId]?.[d.clip];
+    const tl = store[bodyId!]?.[d.clip];
     const k = tl?.keys.find((kf) => Math.abs(kf.t - d.t) < KEY_EPS);
-    keyInfo.textContent = k ? `◆ key @ ${d.clip} t=${d.t.toFixed(2)}` : `frame ${d.fi} · drag or “set key”`;
+    const durMs = clipDurationMs();
+    keyInfo.textContent = !poseMode
+      ? '① pick a time  ② turn on ✎ pose edit'
+      : k
+        ? `◆ key @ ${Math.round(d.t * durMs)}ms (t=${d.t.toFixed(2)})`
+        : tl?.keys.length
+          ? `${Math.round(d.t * durMs)}ms · drag a joint or “set key”`
+          : 'now drag a joint — every drag keys this time';
     kCount.textContent = String(tl?.keys.length ?? 0);
     if (k?.ease) kEase.value = k.ease;
     const doc = curDoc();
-    cDur.value = String(doc ? clipDurationMs() : (tl?.duration ?? clipDurationMs()));
+    const dur = doc ? durMs : (tl?.duration ?? durMs);
+    cDur.value = String(dur);
+    tDur.value = String(dur);
   }
 
   // -------------------------------------------------------------------------
@@ -1268,14 +1836,23 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const clip = activeClip();
     if (mode === 'animate' && playing && clip && clip.frames.length > 1) {
       if (!last) last = now;
-      acc += now - last;
-      const delays = effDelays(clip);
-      let guard = 0;
-      while (acc >= Math.max(30, delays[frameIdx] ?? 120) && guard++ < 8) {
-        acc -= Math.max(30, delays[frameIdx] ?? 120);
-        frameIdx = (frameIdx + 1) % clip.frames.length;
+      if (curDoc()) {
+        // assembled: a continuous clock over the clip duration
+        const total = Math.max(60, clipDurationMs());
+        playMs = (playMs + (now - last)) % total;
+        playT = playMs / total;
+        frameIdx = Math.min(clip.frames.length - 1, Math.round(playT * (clip.frames.length - 1)));
+        render();
+      } else {
+        acc += now - last;
+        const delays = effDelays(clip);
+        let guard = 0;
+        while (acc >= Math.max(30, delays[frameIdx] ?? 120) && guard++ < 8) {
+          acc -= Math.max(30, delays[frameIdx] ?? 120);
+          frameIdx = (frameIdx + 1) % clip.frames.length;
+        }
+        render();
       }
-      render();
     }
     last = now;
     requestAnimationFrame(tick);
@@ -1285,6 +1862,12 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     playing = p;
     acc = 0;
     last = 0;
+    if (p) {
+      curT = null;
+      playMs = 0;
+    } else {
+      playT = null;
+    }
     playBtn.textContent = p ? '❚❚ pause' : '▶ play';
     playBtn.classList.toggle('play', !p);
   }
@@ -1292,6 +1875,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   function setClip(i: number): void {
     clipIdx = i;
     frameIdx = 0;
+    curT = null;
     acc = 0;
     const clip = activeClip();
     scrubEl.max = String(Math.max(0, (clip?.frames.length ?? 1) - 1));
@@ -1319,6 +1903,15 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
       clipsEl.appendChild(b);
     });
     if (doc) {
+      const del = document.createElement('button');
+      del.className = 'as-mini as-danger';
+      del.textContent = '✕';
+      del.title = 'delete this clip';
+      del.onclick = () => {
+        const key = activeClip()?.clipKey;
+        if (key) void deleteClipOp(key);
+      };
+      clipsEl.appendChild(del);
       const menu = document.createElement('button');
       menu.className = 'as-mini';
       menu.textContent = '⋯';
@@ -1338,8 +1931,8 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
       clipsEl.appendChild(menu);
       const add = document.createElement('button');
       add.className = 'as-clipadd';
-      add.textContent = '+ clip';
-      add.title = 'add a clip';
+      add.textContent = '+ new clip';
+      add.title = 'add a clip (then type its name)';
       add.onclick = () => addClipOp();
       clipsEl.appendChild(add);
     }
@@ -1470,10 +2063,16 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const doc = curDoc();
     editCharRow.classList.toggle('as-hidden', !doc);
     cFramesRow.classList.toggle('as-hidden', !doc);
+    cFpsRow.classList.toggle('as-hidden', !doc);
+    $('iFramesRow').classList.toggle('as-hidden', !!doc); // editable field replaces it
     const clip = activeClip();
     iFrames.textContent = clip ? String(clip.frames.length) : '—';
     if (clip) cDur.value = String(Math.round(effDelays(clip).reduce((a, b2) => a + b2, 0)));
-    if (doc && clip) cFrames.value = String(clip.frames.length);
+    if (doc && clip) {
+      cFrames.value = String(clip.frames.length);
+      const fps = doc.clips.find((c) => c.key === clip.clipKey)?.fps ?? 60;
+      cFps.value = String(Math.round(fps * 100) / 100);
+    }
     renderVariants(row);
   }
 
@@ -1527,13 +2126,16 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     current = baked;
     clipIdx = 0;
     frameIdx = 0;
+    curT = null;
     if (current) {
       const max = Math.max(1, Math.floor(Math.min((previewEl.width - 24) / current.bounds.w, (previewEl.height - 24) / current.bounds.h)));
       zoomEl.value = String(Math.min(Number(zoomEl.max), max));
     }
+    poseMode = poseable() && poseWanted;
     poseEditEl.disabled = !poseable();
-    poseMode = poseable() && poseEditEl.checked;
+    poseEditEl.classList.toggle('on', poseMode);
     previewEl.classList.toggle('posing', poseMode);
+    dopeRev++; // fresh bake → rebuild the filmstrip
     const clip = activeClip();
     scrubEl.max = String(Math.max(0, (clip?.frames.length ?? 1) - 1));
     setPlaying(true);
@@ -1648,6 +2250,8 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   const asm = mountAssembly({
     root: asmMain,
     docs,
+    parts: skelParts,
+    onPartsChanged: () => scheduleSkelSave(),
     history,
     toast,
     confirmBox,
@@ -1664,9 +2268,48 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     },
     animate: (docId) => {
       setMode('animate');
-      void selectById(SKEL_PREFIX + docId);
+      // land ready to author: pose edit on, so dragging a joint keys at once
+      void selectById(SKEL_PREFIX + docId).then(() => setPoseMode(true));
     },
   });
+
+  // -------------------------------------------------------------------------
+  // resizable left panel (shared width across both modes, persisted)
+  // -------------------------------------------------------------------------
+  const LEFTW_LS = 'anim-studio:leftw';
+  {
+    const saved = Number(localStorage.getItem(LEFTW_LS));
+    if (saved >= 180 && saved <= 560) app.style.setProperty('--as-leftw', saved + 'px');
+    const mountLeftResizer = (col: HTMLElement | null): void => {
+      if (!col) return;
+      const h = document.createElement('div');
+      h.className = 'as-vresize';
+      h.title = 'drag to resize the panel';
+      col.appendChild(h);
+      h.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        h.setPointerCapture(e.pointerId);
+        h.classList.add('on');
+        const startX = e.clientX;
+        const startW = col.getBoundingClientRect().width;
+        let w = startW;
+        const move = (ev: PointerEvent): void => {
+          w = Math.max(180, Math.min(560, startW + (ev.clientX - startX)));
+          app.style.setProperty('--as-leftw', w + 'px');
+        };
+        const up = (): void => {
+          h.classList.remove('on');
+          h.removeEventListener('pointermove', move);
+          localStorage.setItem(LEFTW_LS, String(Math.round(w)));
+        };
+        h.addEventListener('pointermove', move);
+        h.addEventListener('pointerup', up, { once: true });
+        h.addEventListener('pointercancel', up, { once: true });
+      });
+    };
+    mountLeftResizer(app.querySelector('.as-roster'));
+    mountLeftResizer(asmMain.querySelector('.asm-left'));
+  }
 
   function setMode(m: StudioMode): void {
     if (mode === m) return;
@@ -1699,6 +2342,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     if (!clip) return;
     setPlaying(false);
     frameIdx = (frameIdx - 1 + clip.frames.length) % clip.frames.length;
+    curT = null;
     render();
   };
   stepFwd.onclick = () => {
@@ -1706,11 +2350,13 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     if (!clip) return;
     setPlaying(false);
     frameIdx = (frameIdx + 1) % clip.frames.length;
+    curT = null;
     render();
   };
   scrubEl.oninput = () => {
     setPlaying(false);
     frameIdx = Number(scrubEl.value);
+    curT = null;
     render();
   };
   onionEl.onchange = () => render();
@@ -1718,12 +2364,9 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   zoomEl.oninput = () => render();
   gifEl.onclick = () => exportGif();
 
-  poseEditEl.onchange = () => {
-    poseMode = poseEditEl.checked;
-    previewEl.classList.toggle('posing', poseMode && poseable());
-    render();
-  };
+  poseEditEl.onclick = () => setPoseMode(!poseWanted);
   keyBtn.onclick = () => {
+    if (!poseMode) setPoseMode(true); // "set key" implies posing
     const d = curDrive();
     const bodyId = current?.body.bodyId;
     if (!poseMode || !bodyId || !d) return;
@@ -1743,6 +2386,20 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   };
   copyKeyBtn.onclick = () => void copyKeyOp();
   pasteKeyBtn.onclick = () => void pasteKeyOp();
+  $<HTMLButtonElement>('tAddKey').onclick = () => keyBtn.click();
+  $<HTMLButtonElement>('tDelKey').onclick = () => unkeyBtn.click();
+  const framesToggle = $<HTMLButtonElement>('framesToggle');
+  const applyFramesOpen = (): void => {
+    framesToggle.textContent = framesOpen ? 'frames ▾' : 'frames ▸';
+    dopeEl.classList.toggle('as-hidden', !framesOpen);
+  };
+  applyFramesOpen();
+  framesToggle.onclick = () => {
+    framesOpen = !framesOpen;
+    localStorage.setItem(FRAMES_LS, framesOpen ? '1' : '0');
+    applyFramesOpen();
+    render();
+  };
   $('undoA').onclick = () => doUndo();
   $('redoA').onclick = () => doRedo();
   kEase.onchange = () => {
@@ -1757,27 +2414,42 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
       render();
     }
   };
-  cDur.onchange = () => {
+  function applyDurationMs(ms: number): void {
     const d = curDrive();
     const bodyId = current?.body.bodyId;
     if (!bodyId || !d) return;
     const doc = curDoc();
     const clip = activeClip();
     if (doc && clip) {
-      const per = Math.round((Number(cDur.value) || clipDurationMs()) / Math.max(1, clip.frames.length));
-      withDocHistory(doc, 'clip duration', () => skelPatchClip(doc, clip.clipKey, { per }));
+      // fps stays put; the duration decides how many frames sample it
+      const fps = doc.clips.find((c) => c.key === clip.clipKey)?.fps ?? 60;
+      const frames = Math.max(1, Math.round(((ms || clipDurationMs()) * fps) / 1000));
+      withDocHistory(doc, 'clip duration', () => skelPatchClip(doc, clip.clipKey, { frames }));
       refreshSkelBody();
     } else {
       withClipsHistory('clip duration', bodyId, () => {
-        timelineFor(store, bodyId, d.clip, true)!.duration = Number(cDur.value) || undefined;
+        timelineFor(store, bodyId, d.clip, true)!.duration = ms || undefined;
       });
+      render();
     }
-  };
+  }
+  cDur.onchange = () => applyDurationMs(Number(cDur.value) || 0);
+  tDur.onchange = () => applyDurationMs(Number(tDur.value) || 0);
   cFrames.onchange = () => {
     const doc = curDoc();
     const clip = activeClip();
     if (!doc || !clip) return;
     withDocHistory(doc, 'clip frames', () => skelPatchClip(doc, clip.clipKey, { frames: Number(cFrames.value) || clip.frames.length }));
+    refreshSkelBody();
+  };
+  cFps.onchange = () => {
+    const doc = curDoc();
+    const clip = activeClip();
+    if (!doc || !clip) return;
+    // keep the DURATION: re-count the frames at the new rate
+    const dur = clipDurationMs();
+    const fps = Math.max(1, Math.min(240, Number(cFps.value) || 60));
+    withDocHistory(doc, 'clip fps', () => skelPatchClip(doc, clip.clipKey, { fps, frames: Math.max(1, Math.round((dur * fps) / 1000)) }));
     refreshSkelBody();
   };
   $('resetClip').onclick = () => {
@@ -1841,16 +2513,20 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     else if (e.key === 'Home') {
       setPlaying(false);
       frameIdx = 0;
+      curT = null;
       render();
     } else if (e.key === 'End') {
       const clip = activeClip();
       if (clip) {
         setPlaying(false);
         frameIdx = clip.frames.length - 1;
+        curT = null;
         render();
       }
     } else if (e.key.toLowerCase() === 'k') keyBtn.click();
-    else if (e.key === 'Delete' || e.key === 'Backspace') {
+    else if (e.key.toLowerCase() === 'p') {
+      if (!poseEditEl.disabled) setPoseMode(!poseWanted);
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
       if (poseMode) unkeyBtn.click();
     }
   });
@@ -1880,12 +2556,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
         poseable: poseable(),
       };
     },
-    setPose: (on: boolean) => {
-      poseMode = on && poseable();
-      poseEditEl.checked = poseMode;
-      previewEl.classList.toggle('posing', poseMode);
-      render();
-    },
+    setPose: (on: boolean) => setPoseMode(on),
     bones: () => handles.map((h) => ({ id: h.bone.id, kind: h.bone.kind, x: h.x, y: h.y })),
     nudge: (boneId: string, dAng: number) => {
       const d = curDrive();
@@ -1971,6 +2642,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
           if (patch[f] !== undefined) bone[f] = patch[f];
         }
         if (patch.joint) bone.joint = patch.joint;
+        if (patch.img && bone.img) Object.assign(bone.img, patch.img);
         if (patch.name !== undefined) skelRenameBone(doc, bone.id, patch.name);
         return true;
       });
