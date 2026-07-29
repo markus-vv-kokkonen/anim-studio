@@ -16,8 +16,9 @@ version-controlled data that both you and an agent can iterate on.
 The studio has two modes, Spine-style:
 
 - **Animate** — the keyframe editor above, over every body in the roster.
-  Keys move on the dope sheet (drag), copy/paste between frames, and every
-  edit is undoable.
+  The timeline is a live filmstrip: every frame cell shows the character as
+  it renders at that frame, keyed frames wear a ◆ badge, keys drag between
+  frames, copy/paste works, and every edit is undoable.
 - **Assemble** — import pictures, attach them as bones, drag/rotate/scale
   them into a rig, parent bones into a hierarchy, and configure each joint
   (free / hinge with limits / welded). Assembled characters join the roster
@@ -71,7 +72,7 @@ bun run verify         # headless end-to-end: pose → key → save → replay,
                        # then assemble → clip CRUD → key CRUD → reload
 ```
 
-In the demo: pick **scout**, choose the *attack* clip, tick **pose edit**,
+In the demo: pick **scout**, choose the *attack* clip, turn on **✎ pose edit**,
 drag the staff arm (cyan), a foot (green) or the body root (amber), then
 **Save** — the key lands in `demo/clips.ts`, and on reload the baked clip
 plays your edit. `demo/bodies.ts` is the integration example: a real game

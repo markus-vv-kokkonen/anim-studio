@@ -129,15 +129,17 @@ const CSS = `
   border-radius:50%; cursor:pointer; }
 .as-helpbtn:hover { border-color:var(--accent); color:var(--ink); }
 
-.as-main, .asm-main { flex:1; display:grid; grid-template-columns:242px 1fr 282px; min-height:0; }
+.as-main, .asm-main { flex:1; display:grid; grid-template-columns:var(--as-leftw, 260px) 1fr 282px; min-height:0; }
 .as-col { min-height:0; overflow:hidden; display:flex; flex-direction:column; }
-.as-roster, .asm-left { border-right:1px solid var(--edge); background:var(--panel); }
+.as-roster, .asm-left { border-right:1px solid var(--edge); background:var(--panel); position:relative; overflow-x:hidden; }
+.as-vresize { position:absolute; top:0; right:0; width:7px; height:100%; cursor:col-resize; z-index:12; }
+.as-vresize:hover, .as-vresize.on { background:linear-gradient(90deg, transparent, rgba(115,239,247,0.3)); }
 .as-inspector, .asm-right { border-left:1px solid var(--edge); background:var(--panel); overflow-y:auto; }
 .as-pad { padding:10px; }
 .as-search { width:100%; padding:6px 8px; background:var(--panel2); border:1px solid var(--edge);
   color:var(--ink); border-radius:6px; font:inherit; }
 .as-search::placeholder { color:var(--dim); }
-.as-list { flex:1; overflow-y:auto; padding:4px; }
+.as-list { flex:1; overflow-y:auto; overflow-x:hidden; padding:4px; }
 .as-grp { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:1px;
   padding:8px 6px 3px; position:sticky; top:0; background:var(--panel); z-index:1; }
 .as-row { display:flex; align-items:center; gap:8px; padding:4px 6px; border-radius:6px; cursor:pointer; }
@@ -171,25 +173,31 @@ const CSS = `
 .as-clipedit { width:110px; padding:3px 8px; background:var(--panel2); border:1px solid var(--accent);
   color:var(--ink); border-radius:6px; font:inherit; }
 
-.as-tbar { display:flex; align-items:center; gap:8px; }
+.as-tbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .as-tbar button { padding:4px 9px; border:1px solid var(--edge); background:var(--panel2);
-  color:var(--ink); border-radius:6px; cursor:pointer; }
+  color:var(--ink); border-radius:6px; cursor:pointer; white-space:nowrap; flex:none; }
 .as-tbar button:hover:not(:disabled) { border-color:var(--accent); }
 .as-tbar button:disabled { opacity:.4; cursor:default; }
 .as-tbar button.play { background:var(--accent2); color:#0c0e17; border-color:var(--accent2); font-weight:600; }
 .as-scrub { flex:1; accent-color:var(--accent); }
 .as-tbar .fno { color:var(--dim); min-width:108px; text-align:right; font-variant-numeric:tabular-nums; }
 .as-app label.chk { display:inline-flex; align-items:center; gap:5px; color:var(--dim); cursor:pointer; }
+.as-rowlabel { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:1px; min-width:38px; flex:none; }
+.as-posebtn.on { background:var(--accent) !important; color:#0c0e17 !important; border-color:var(--accent) !important; font-weight:600; }
 
-.as-dope { display:flex; gap:2px; align-items:flex-end; height:26px; padding:0 2px; touch-action:none; }
-.as-dope .tick { flex:1; height:10px; border-radius:2px; background:var(--panel2); cursor:pointer;
-  border:1px solid transparent; min-width:6px; }
-.as-dope .tick:hover { background:var(--panel3); }
-.as-dope .tick.here { border-color:var(--accent); height:16px; }
-.as-dope .tick.key { background:var(--warn); height:14px; cursor:grab; }
-.as-dope .tick.key.here { border-color:var(--accent); height:18px; }
-.as-dope .tick.drop { border-color:var(--accent2); background:var(--panel3); height:18px; }
-.as-dope .tick.key.drop { background:var(--accent2); }
+.as-dope { display:flex; gap:3px; align-items:stretch; height:58px; padding:2px;
+  overflow-x:auto; overflow-y:hidden; touch-action:none; }
+.as-dope .fcell { position:relative; flex:none; background:var(--panel2); border:1px solid var(--edge);
+  border-radius:5px; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:2px 3px 11px; }
+.as-dope .fcell:hover { border-color:var(--accent); }
+.as-dope .fcell.here { border-color:var(--accent); background:var(--panel3); box-shadow:0 0 0 1px var(--accent); }
+.as-dope .fcell.key { border-color:var(--warn); cursor:grab; }
+.as-dope .fcell.drop { border-color:var(--accent2); box-shadow:0 0 0 1px var(--accent2); }
+.as-dope .fthumb { image-rendering:pixelated; pointer-events:none; }
+.as-dope .fno2 { position:absolute; bottom:0; left:3px; font-size:9px; color:var(--dim); pointer-events:none; }
+.as-dope .fkey { position:absolute; bottom:-1px; right:2px; font-size:10px; color:var(--warn);
+  display:none; pointer-events:none; text-shadow:0 1px 2px #000; }
+.as-dope .fcell.key .fkey { display:block; }
 
 .as-sect { border-bottom:1px solid var(--edge); }
 .as-sect h3 { font-size:11px; color:var(--accent2); margin:0; padding:9px 10px 5px;
@@ -254,11 +262,12 @@ const CSS = `
 .asm-empty button { margin-top:10px; padding:7px 16px; border:1px solid var(--accent2); background:var(--panel2);
   color:var(--accent2); border-radius:7px; cursor:pointer; font:inherit; font-weight:600; }
 .asm-empty button:hover { background:var(--accent2); color:#0c0e17; }
-.asm-charlist { max-height:150px; overflow-y:auto; padding:2px 6px 8px; }
+.asm-charlist { max-height:150px; overflow-y:auto; overflow-x:hidden; padding:2px 6px 8px; }
 .asm-partsect { flex:1; display:flex; flex-direction:column; min-height:0; }
-.asm-partgrid { flex:1; overflow-y:auto; display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; padding:6px 10px; align-content:start; }
+.asm-partgrid { flex:1; overflow-y:auto; overflow-x:hidden; display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(84px, 1fr)); gap:6px; padding:6px 10px; align-content:start; }
 .asm-part { background:var(--panel2); border:1px solid var(--edge); border-radius:6px; padding:4px;
-  cursor:pointer; text-align:center; }
+  cursor:pointer; text-align:center; min-width:0; }
 .asm-part:hover { border-color:var(--accent2); }
 .asm-part img { width:100%; height:40px; object-fit:contain; image-rendering:pixelated; }
 .asm-partname { color:var(--dim); font-size:9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -296,7 +305,7 @@ const SHELL = `
       <div class="as-boot" data-as="boot">baking the roster…</div>
     </div>
     <div class="as-transport">
-      <div class="as-clips" data-as="clips"></div>
+      <div class="as-tbar"><span class="as-rowlabel">clips</span><div class="as-clips" data-as="clips" style="flex:1"></div></div>
       <div class="as-tbar">
         <button class="play" data-as="playBtn" title="play / pause (Space)">▶ play</button>
         <button data-as="stepBack" title="previous frame (←)">◀</button>
@@ -312,18 +321,19 @@ const SHELL = `
         <a class="as-gif" data-as="gif" download="clip.gif" href="#" title="export the current clip as an animated GIF">⬇ export GIF</a>
       </div>
       <div class="as-tbar">
-        <label class="chk"><input type="checkbox" data-as="poseEdit" /> <b style="color:var(--accent)">pose edit</b></label>
+        <button class="as-posebtn" data-as="poseEdit" title="toggle pose editing: drag joints to pose, every drag keys the frame (P)">✎ pose edit</button>
         <button data-as="keyBtn" title="set a key at this frame (K)">◆ set key</button>
         <button data-as="unkeyBtn" title="clear the key at this frame (Del)">◇ clear</button>
         <button data-as="copyKey" title="copy the key at this frame">⧉ copy</button>
         <button data-as="pasteKey" title="paste the copied key at this frame">⧉ paste</button>
-        <span class="fno" data-as="keyInfo" style="min-width:150px;text-align:left">drag a joint to pose</span>
-        <span style="flex:1"></span>
-        <button data-as="undoA" title="undo (Ctrl+Z)">↶</button>
-        <button data-as="redoA" title="redo (Ctrl+Shift+Z)">↷</button>
-        <button data-as="resetClip" title="delete every key of this clip">reset clip</button>
+        <span class="fno" data-as="keyInfo" style="flex:1;min-width:90px;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">drag a joint to pose</span>
+        <span style="display:flex;gap:8px;flex:none">
+          <button data-as="undoA" title="undo (Ctrl+Z)">↶</button>
+          <button data-as="redoA" title="redo (Ctrl+Shift+Z)">↷</button>
+          <button data-as="resetClip" title="delete every key of this clip">reset clip</button>
+        </span>
       </div>
-      <div class="as-dope" data-as="dope" title="keyframes on the clip timeline — drag a key to move it"></div>
+      <div class="as-tbar"><span class="as-rowlabel">keys</span><div class="as-dope" data-as="dope" style="flex:1" title="keyframes on the clip timeline — click to jump, drag a key to move it"></div></div>
     </div>
   </div>
   <div class="as-col as-inspector">
@@ -415,7 +425,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   const iSize = $<HTMLSpanElement>('iSize');
   const iInfo = $<HTMLDivElement>('iInfo');
   const iFrames = $<HTMLSpanElement>('iFrames');
-  const poseEditEl = $<HTMLInputElement>('poseEdit');
+  const poseEditEl = $<HTMLButtonElement>('poseEdit');
   const keyBtn = $<HTMLButtonElement>('keyBtn');
   const unkeyBtn = $<HTMLButtonElement>('unkeyBtn');
   const copyKeyBtn = $<HTMLButtonElement>('copyKey');
@@ -501,6 +511,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
         <kbd>Space</kbd><span>play / pause (Animate) · hold to pan (Assemble)</span>
         <kbd>← →</kbd><span>step a frame · nudge the selected bone (Assemble)</span>
         <kbd>Home / End</kbd><span>first / last frame</span>
+        <kbd>P</kbd><span>toggle ✎ pose edit</span>
         <kbd>K</kbd><span>set a key at this frame</span>
         <kbd>Del</kbd><span>clear the key (Animate) · delete the bone (Assemble)</span>
         <kbd>Ctrl+Z / Ctrl+Shift+Z</kbd><span>undo / redo</span>
@@ -509,8 +520,15 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
         <kbd>Shift</kbd><span>drag = move a skeleton joint · 15° rotation snap (Assemble)</span>
         <kbd>?</kbd><span>this help</span>
       </div>
-      <p>Dope sheet: click a tick to jump, drag an amber key to move it.
-      Double-click an assembled body's clip tab to rename it; <b>⋯</b> duplicates or deletes it.</p>
+      <p><b>Building an animation from scratch:</b> pick a body (or press
+      ▶ animate on an assembled character) → choose or <b>+ new clip</b> →
+      turn on <b>✎ pose edit</b> → step to a frame → drag joints (every drag
+      keys that frame) → step to another frame and pose again → press Space to
+      review. Keys show as ◆ on the filmstrip: click to jump, drag to move,
+      copy/paste to reuse.</p>
+      <p>Double-click an assembled body's clip tab to rename it; <b>⋯</b>
+      duplicates or deletes it. The frames + duration fields in the inspector
+      retime the clip.</p>
       <div class="btns"><button class="ok">close</button></div>`;
     mboxEl.querySelector<HTMLButtonElement>('.ok')!.onclick = () => closeModal(false);
     modalEl.classList.remove('as-hidden');
@@ -731,6 +749,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   let clipIdx = 0;
   let frameIdx = 0;
   let poseMode = false;
+  let poseWanted = false; // the user's toggle; poseMode = poseWanted && poseable
   let handles: { bone: BoneRec; x: number; y: number }[] = [];
   let lastView = { dx: 0, dy: 0, scale: 1 };
   let keyClipboard: { pose: Pose; ease?: Ease } | null = null;
@@ -804,6 +823,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
       }
     }
     if (isSkelBodyId(bodyId)) scheduleSkelSave();
+    dopeRev++;
     render();
   }
   /** Run a clip-store mutation with an undo entry (no-op edits push nothing). */
@@ -814,6 +834,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     if (before !== after) {
       history.push({ label, undo: () => restoreClips(bodyId, before), redo: () => restoreClips(bodyId, after) });
       if (isSkelBodyId(bodyId)) scheduleSkelSave();
+      dopeRev++;
     }
   }
 
@@ -835,6 +856,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const body = skeletonBody(doc, store);
     const baked = { body, bounds: contentBounds(body) };
     current = baked;
+    dopeRev++; // structure changed → rebuild the filmstrip
     bakeCache.set(skelCacheKey(doc), Promise.resolve(baked));
     clipIdx = Math.max(0, body.clips.findIndex((c) => c.clipKey === want));
     const clip = activeClip();
@@ -974,6 +996,18 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     updateKeyUI();
   }
 
+  function setPoseMode(on: boolean): void {
+    poseWanted = on;
+    poseMode = on && poseable();
+    poseEditEl.disabled = !poseable();
+    poseEditEl.title = poseable()
+      ? 'toggle pose editing: drag joints to pose, every drag keys the frame (P)'
+      : 'this body has no pose rig (view only)';
+    poseEditEl.classList.toggle('on', poseMode);
+    previewEl.classList.toggle('posing', poseMode);
+    render();
+  }
+
   // responsive preview: fill the stage, re-render on resize
   new ResizeObserver(() => {
     const r = viewEl.getBoundingClientRect();
@@ -1071,6 +1105,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
       off.dAng = next;
     }
     render();
+    refreshDopeThumb(frameIdx); // live filmstrip feedback while dragging
   });
 
   function endDrag(e: PointerEvent): void {
@@ -1088,6 +1123,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
       const before = d.histBefore;
       history.push({ label: 'pose ' + d.bone.id, undo: () => restoreClips(bodyId, before), redo: () => restoreClips(bodyId, after) });
       if (isSkelBodyId(bodyId)) scheduleSkelSave();
+      dopeRev++;
     }
     render();
   }
@@ -1104,36 +1140,90 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
 
   let keyDrag: { from: number; to: number } | null = null;
 
-  function renderDope(): void {
+  // The dope sheet is a FILMSTRIP: every frame cell shows the character as it
+  // renders at that frame (live-sampled, so edits show immediately), with a ◆
+  // badge on keyed frames. Rebuilding thumbnails is the expensive part, so the
+  // strip is cached and rebuilt only when the body/clip/keys change; the
+  // playhead highlight updates per tick for free.
+  let dopeRev = 0; // bump on any authored-keys change → thumbnails rebuild
+  let dopeKey = '';
+  let dopeCells: HTMLDivElement[] = [];
+
+  function drawThumb(cv: HTMLCanvasElement, fi: number): void {
+    if (!current) return;
+    const b = current.bounds;
+    const s = Math.min(40 / b.h, 60 / b.w);
+    cv.width = Math.max(18, Math.round(b.w * s));
+    cv.height = 40;
+    const r = current.body.frame(fi);
+    if (!r) return;
+    const cx = cv.getContext('2d')!;
+    cx.imageSmoothingEnabled = false;
+    cx.drawImage(r.src, r.x + b.x, r.y + b.y, b.w, b.h, (cv.width - b.w * s) / 2, (40 - b.h * s) / 2, b.w * s, b.h * s);
+  }
+
+  function rebuildDope(clip: ClipDef): void {
     dopeEl.innerHTML = '';
-    const clip = activeClip();
-    if (!current || !clip) return;
+    dopeCells = [];
+    if (!current) return;
     const bodyId = current.body.bodyId;
     clip.frames.forEach((fi, i) => {
       const pf = current?.body.plan[fi];
       if (!pf) return;
       const tl = bodyId ? store[bodyId]?.[pf.clip] : undefined;
       const keyed = !!tl?.keys.some((kf) => Math.abs(kf.t - pf.t) < KEY_EPS);
-      const el = document.createElement('div');
-      el.className = 'tick' + (keyed ? ' key' : '') + (i === frameIdx ? ' here' : '');
-      el.dataset.i = String(i);
-      el.title = `frame ${i + 1}` + (keyed ? ' · keyed — drag to move' : '');
-      dopeEl.appendChild(el);
+      const cell = document.createElement('div');
+      cell.className = 'fcell' + (keyed ? ' key' : '');
+      cell.dataset.i = String(i);
+      cell.title = `frame ${i + 1}` + (keyed ? ' · keyed — drag to move' : '');
+      const cv = document.createElement('canvas');
+      cv.className = 'fthumb';
+      drawThumb(cv, fi);
+      const no = document.createElement('span');
+      no.className = 'fno2';
+      no.textContent = String(i + 1);
+      const badge = document.createElement('span');
+      badge.className = 'fkey';
+      badge.textContent = '◆';
+      cell.append(cv, no, badge);
+      dopeCells.push(cell);
+      dopeEl.appendChild(cell);
     });
   }
 
-  function dopeIndexAt(clientX: number): number | null {
-    const ticks = [...dopeEl.querySelectorAll<HTMLElement>('.tick')];
-    if (!ticks.length) return null;
-    for (const t of ticks) {
-      const r = t.getBoundingClientRect();
-      if (clientX >= r.left - 1 && clientX <= r.right + 1) return Number(t.dataset.i);
+  function renderDope(): void {
+    const clip = activeClip();
+    if (!current || !clip) {
+      dopeEl.innerHTML = '';
+      dopeKey = '';
+      return;
     }
-    return clientX < ticks[0].getBoundingClientRect().left ? Number(ticks[0].dataset.i) : Number(ticks[ticks.length - 1].dataset.i);
+    const key = `${roster[selected]?.id}|${clipIdx}|${clip.frames.length}|${dopeRev}`;
+    if (key !== dopeKey) {
+      rebuildDope(clip);
+      dopeKey = key;
+    }
+    dopeCells.forEach((c, i) => c.classList.toggle('here', i === frameIdx));
+  }
+
+  /** Redraw one cell's thumbnail (live feedback while dragging a joint). */
+  function refreshDopeThumb(i: number): void {
+    const clip = activeClip();
+    const cv = dopeCells[i]?.querySelector<HTMLCanvasElement>('.fthumb');
+    if (clip && cv) drawThumb(cv, clip.frames[i] ?? 0);
+  }
+
+  function dopeIndexAt(clientX: number): number | null {
+    if (!dopeCells.length) return null;
+    for (const t of dopeCells) {
+      const r = t.getBoundingClientRect();
+      if (clientX >= r.left - 2 && clientX <= r.right + 2) return Number(t.dataset.i);
+    }
+    return clientX < dopeCells[0].getBoundingClientRect().left ? Number(dopeCells[0].dataset.i) : Number(dopeCells[dopeCells.length - 1].dataset.i);
   }
 
   dopeEl.addEventListener('pointerdown', (e) => {
-    const t = (e.target as HTMLElement).closest<HTMLElement>('.tick');
+    const t = (e.target as HTMLElement).closest<HTMLElement>('.fcell');
     if (!t) return;
     const i = Number(t.dataset.i);
     setPlaying(false);
@@ -1150,7 +1240,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const i = dopeIndexAt(e.clientX);
     if (i === null || i === keyDrag.to) return;
     keyDrag.to = i;
-    dopeEl.querySelectorAll<HTMLElement>('.tick').forEach((t) => t.classList.toggle('drop', Number(t.dataset.i) === i));
+    dopeCells.forEach((t) => t.classList.toggle('drop', Number(t.dataset.i) === i));
   });
   function endKeyDrag(e: PointerEvent): void {
     if (!keyDrag) return;
@@ -1237,8 +1327,12 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
 
   function updateKeyUI(): void {
     const bodyId = current?.body.bodyId;
-    if (!poseable() || !bodyId) {
+    const can = poseable() && !!bodyId;
+    for (const b of [keyBtn, unkeyBtn, copyKeyBtn, pasteKeyBtn]) b.disabled = !can;
+    kEase.disabled = !can;
+    if (!can) {
       dopeEl.innerHTML = '';
+      dopeKey = '';
       keyInfo.textContent = current && !poseable() ? 'this body has no pose rig (view only)' : '';
       kCount.textContent = '0';
       return;
@@ -1246,9 +1340,15 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     renderDope();
     const d = curDrive();
     if (!d) return;
-    const tl = store[bodyId]?.[d.clip];
+    const tl = store[bodyId!]?.[d.clip];
     const k = tl?.keys.find((kf) => Math.abs(kf.t - d.t) < KEY_EPS);
-    keyInfo.textContent = k ? `◆ key @ ${d.clip} t=${d.t.toFixed(2)}` : `frame ${d.fi} · drag or “set key”`;
+    keyInfo.textContent = !poseMode
+      ? '① pick a frame  ② turn on ✎ pose edit'
+      : k
+        ? `◆ key @ ${d.clip} t=${d.t.toFixed(2)}`
+        : tl?.keys.length
+          ? `frame ${d.fi} · drag a joint or “set key”`
+          : 'now drag a joint — every drag keys this frame';
     kCount.textContent = String(tl?.keys.length ?? 0);
     if (k?.ease) kEase.value = k.ease;
     const doc = curDoc();
@@ -1338,8 +1438,8 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
       clipsEl.appendChild(menu);
       const add = document.createElement('button');
       add.className = 'as-clipadd';
-      add.textContent = '+ clip';
-      add.title = 'add a clip';
+      add.textContent = '+ new clip';
+      add.title = 'add a clip (then type its name)';
       add.onclick = () => addClipOp();
       clipsEl.appendChild(add);
     }
@@ -1531,9 +1631,11 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
       const max = Math.max(1, Math.floor(Math.min((previewEl.width - 24) / current.bounds.w, (previewEl.height - 24) / current.bounds.h)));
       zoomEl.value = String(Math.min(Number(zoomEl.max), max));
     }
+    poseMode = poseable() && poseWanted;
     poseEditEl.disabled = !poseable();
-    poseMode = poseable() && poseEditEl.checked;
+    poseEditEl.classList.toggle('on', poseMode);
     previewEl.classList.toggle('posing', poseMode);
+    dopeRev++; // fresh bake → rebuild the filmstrip
     const clip = activeClip();
     scrubEl.max = String(Math.max(0, (clip?.frames.length ?? 1) - 1));
     setPlaying(true);
@@ -1664,9 +1766,48 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     },
     animate: (docId) => {
       setMode('animate');
-      void selectById(SKEL_PREFIX + docId);
+      // land ready to author: pose edit on, so dragging a joint keys at once
+      void selectById(SKEL_PREFIX + docId).then(() => setPoseMode(true));
     },
   });
+
+  // -------------------------------------------------------------------------
+  // resizable left panel (shared width across both modes, persisted)
+  // -------------------------------------------------------------------------
+  const LEFTW_LS = 'anim-studio:leftw';
+  {
+    const saved = Number(localStorage.getItem(LEFTW_LS));
+    if (saved >= 180 && saved <= 560) app.style.setProperty('--as-leftw', saved + 'px');
+    const mountLeftResizer = (col: HTMLElement | null): void => {
+      if (!col) return;
+      const h = document.createElement('div');
+      h.className = 'as-vresize';
+      h.title = 'drag to resize the panel';
+      col.appendChild(h);
+      h.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        h.setPointerCapture(e.pointerId);
+        h.classList.add('on');
+        const startX = e.clientX;
+        const startW = col.getBoundingClientRect().width;
+        let w = startW;
+        const move = (ev: PointerEvent): void => {
+          w = Math.max(180, Math.min(560, startW + (ev.clientX - startX)));
+          app.style.setProperty('--as-leftw', w + 'px');
+        };
+        const up = (): void => {
+          h.classList.remove('on');
+          h.removeEventListener('pointermove', move);
+          localStorage.setItem(LEFTW_LS, String(Math.round(w)));
+        };
+        h.addEventListener('pointermove', move);
+        h.addEventListener('pointerup', up, { once: true });
+        h.addEventListener('pointercancel', up, { once: true });
+      });
+    };
+    mountLeftResizer(app.querySelector('.as-roster'));
+    mountLeftResizer(asmMain.querySelector('.asm-left'));
+  }
 
   function setMode(m: StudioMode): void {
     if (mode === m) return;
@@ -1718,12 +1859,9 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   zoomEl.oninput = () => render();
   gifEl.onclick = () => exportGif();
 
-  poseEditEl.onchange = () => {
-    poseMode = poseEditEl.checked;
-    previewEl.classList.toggle('posing', poseMode && poseable());
-    render();
-  };
+  poseEditEl.onclick = () => setPoseMode(!poseWanted);
   keyBtn.onclick = () => {
+    if (!poseMode) setPoseMode(true); // "set key" implies posing
     const d = curDrive();
     const bodyId = current?.body.bodyId;
     if (!poseMode || !bodyId || !d) return;
@@ -1850,7 +1988,9 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
         render();
       }
     } else if (e.key.toLowerCase() === 'k') keyBtn.click();
-    else if (e.key === 'Delete' || e.key === 'Backspace') {
+    else if (e.key.toLowerCase() === 'p') {
+      if (!poseEditEl.disabled) setPoseMode(!poseWanted);
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
       if (poseMode) unkeyBtn.click();
     }
   });
@@ -1880,12 +2020,7 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
         poseable: poseable(),
       };
     },
-    setPose: (on: boolean) => {
-      poseMode = on && poseable();
-      poseEditEl.checked = poseMode;
-      previewEl.classList.toggle('posing', poseMode);
-      render();
-    },
+    setPose: (on: boolean) => setPoseMode(on),
     bones: () => handles.map((h) => ({ id: h.bone.id, kind: h.bone.kind, x: h.x, y: h.y })),
     nudge: (boneId: string, dAng: number) => {
       const d = curDrive();
