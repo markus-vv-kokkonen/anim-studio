@@ -5,6 +5,7 @@
  * The pieces:
  *  - types.ts     the stored format (poses, keyframes, timelines)
  *  - sample.ts    sample a timeline at a clip-time (game + studio share it)
+ *  - variation.ts optional deterministic per-cycle randomisation
  *  - emit.ts      deterministic clips-file emitters (TS module / JSON)
  *  - timeline.ts  keyframe edit operations over the authored store
  *  - rig.ts       the bone contract: record sink + canvas FK/IK/root helpers
@@ -19,6 +20,7 @@
  */
 export * from './types';
 export * from './sample';
+export * from './variation';
 export * from './emit';
 export * from './timeline';
 export * from './rig';

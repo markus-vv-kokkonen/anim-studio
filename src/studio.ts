@@ -17,10 +17,11 @@
  */
 import { GIFEncoder, quantize, applyPalette } from 'gifenc';
 import type { StudioAdapter, BodyDesc, BakedBody, ClipDef, VariantValues } from './adapter';
-import type { Ease, Pose, Keyframe } from './types';
+import type { Ease, Pose, Keyframe, ClipVariation } from './types';
 import type { BoneRec } from './rig';
 import { boneScreen } from './rig';
 import { samplePose } from './sample';
+import { samplePoseVaried, variationFor } from './variation';
 import { timelineFor, keyAt, clearKeyAt, prunedClips, countKeys, KEY_EPS } from './timeline';
 import { History } from './history.ts';
 import type { SkeletonDoc, SkelPart } from './skeleton.ts';
@@ -73,6 +74,9 @@ export interface StudioApi {
   moveKey(fromFrame: number, toFrame: number): boolean;
   copyKey(): boolean;
   pasteKey(): boolean;
+  // per-clip random variation (current body + clip)
+  getVariation(): ClipVariation | undefined;
+  setVariation(patch: Partial<ClipVariation>): boolean;
   // clip CRUD (assembled bodies)
   addClip(name: string): string | null;
   renameClip(key: string, name: string): boolean;
@@ -429,6 +433,23 @@ const SHELL = `
       <div class="as-field" data-as="iFramesRow"><label>frames</label><span data-as="iFrames">—</span></div>
     </div>
     <div class="as-sect">
+      <h3>Variation <button class="as-mini" data-as="vShuffle" title="draw a different (still repeatable) variation set">⟳ reseed</button></h3>
+      <div class="as-field"><label>amplitude ±%</label>
+        <input type="number" data-as="vAmp" min="0" max="100" step="5" style="width:78px"
+          title="how far the motion travels: 15 = between 85% (falls short) and 115% (overshoots), drawn per bone each loop" /></div>
+      <div class="as-field"><label>speed ±%</label>
+        <input type="number" data-as="vSpeed" min="0" max="100" step="5" style="width:78px"
+          title="per-loop tempo jitter" /></div>
+      <div class="as-field"><label>phase ±%</label>
+        <input type="number" data-as="vPhase" min="0" max="100" step="5" style="width:78px"
+          title="per-loop start offset, so copies of this body drift out of sync" /></div>
+      <div class="as-field"><label class="chk"><input type="checkbox" data-as="vPreview" checked /> preview while playing</label>
+        <span data-as="vState" class="ti">—</span></div>
+      <div class="as-note">Optional. All zero = every loop plays exactly as authored.
+      Variation is applied when sampling (never baked into keys) from a deterministic
+      seed, so the studio, your bake, and the game all agree.</div>
+    </div>
+    <div class="as-sect">
       <h3>Keyframe</h3>
       <div class="as-field"><label>ease in</label>
         <select data-as="kEase">
@@ -508,6 +529,11 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   const cFramesRow = $<HTMLDivElement>('cFramesRow');
   const cFps = $<HTMLInputElement>('cFps');
   const cFpsRow = $<HTMLDivElement>('cFpsRow');
+  const vAmp = $<HTMLInputElement>('vAmp');
+  const vSpeed = $<HTMLInputElement>('vSpeed');
+  const vPhase = $<HTMLInputElement>('vPhase');
+  const vPreview = $<HTMLInputElement>('vPreview');
+  const vState = $<HTMLSpanElement>('vState');
   const kEase = $<HTMLSelectElement>('kEase');
   const kCount = $<HTMLSpanElement>('kCount');
   const saveBtn = $<HTMLButtonElement>('saveBtn');
@@ -897,6 +923,10 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
    *  displayed frame instead of stepping baked samples). */
   let playMs = 0;
   let playT: number | null = null;
+  /** Loop counter driving per-cycle variation, and the studio's instance seed
+   *  (⟳ reseed bumps it to preview a different draw). */
+  let playCycle = 0;
+  let previewSeed = 0;
   let handles: { bone: BoneRec; x: number; y: number }[] = [];
   let lastView = { dx: 0, dy: 0, scale: 1 };
   let keyClipboard: { pose: Pose; ease?: Ease } | null = null;
@@ -958,6 +988,19 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const clip = activeClip();
     if (!current || !clip) return 0;
     return current.body.plan[clip.frames[i] ?? -1]?.t ?? 0;
+  }
+
+  /** The active clip's variation config, if any. */
+  function curVariation(): ClipVariation | undefined {
+    const clip = activeClip();
+    const bodyId = current?.body.bodyId;
+    return clip && bodyId ? store[bodyId]?.[clip.clipKey]?.variation : undefined;
+  }
+
+  /** Variation is previewed only while PLAYING — authoring always shows the
+   *  exact authored pose, so a drag edits what you see. */
+  function variationActive(): boolean {
+    return vPreview.checked && !variationFor(curVariation(), 0, 0).identity;
   }
 
   /** Jump the playhead to a continuous time (nearest frame renders it). */
@@ -1102,11 +1145,17 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     drawGuides(bounds, dx, dy, scale, fw);
 
     const fi = clip.frames[frameIdx] ?? clip.frames[0];
-    if (playT !== null && playing && current.body.renderPose && curDoc()) {
-      // assembled bodies play CONTINUOUSLY: sample the keys at the exact
-      // elapsed time — frames are just the export grid, keys are the motion
-      const bodyId = current.body.bodyId!;
-      const posed = current.body.renderPose(fi, samplePose(store[bodyId]?.[clip.clipKey], playT));
+    const bodyId = current.body.bodyId;
+    const varOn = variationActive();
+    // Draw live (direct-draw under a sampled pose) when the frame can't be a
+    // plain blit: assembled bodies play CONTINUOUSLY (keys are the motion,
+    // frames only the export grid), and variation is a per-cycle sampling
+    // layer no baked sheet can carry.
+    if (playing && bodyId && current.body.renderPose && (playT !== null || varOn)) {
+      const t = playT ?? current.body.plan[fi]?.t ?? 0;
+      const tl = store[bodyId]?.[clip.clipKey];
+      const pose = varOn ? samplePoseVaried(tl, t, playCycle, previewSeed) : samplePose(tl, t);
+      const posed = current.body.renderPose(fi, pose);
       if (posed) {
         pctx.imageSmoothingEnabled = false;
         pctx.drawImage(posed.canvas, 0, 0, posed.fw, posed.fh, dx, dy, posed.fw * scale, posed.fh * scale);
@@ -1883,6 +1932,28 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const dur = doc ? durMs : (tl?.duration ?? durMs);
     cDur.value = String(dur);
     tDur.value = String(dur);
+    updateVariationUI();
+  }
+
+  const pct = (v: number | undefined): string => String(Math.round((v ?? 0) * 100));
+
+  function updateVariationUI(): void {
+    const can = poseable() && !!current?.body.bodyId;
+    for (const i of [vAmp, vSpeed, vPhase]) i.disabled = !can;
+    const v = curVariation();
+    if (document.activeElement !== vAmp) vAmp.value = pct(v?.amp);
+    if (document.activeElement !== vSpeed) vSpeed.value = pct(v?.speed);
+    if (document.activeElement !== vPhase) vPhase.value = pct(v?.phase);
+    if (!can) {
+      vState.textContent = '—';
+      return;
+    }
+    if (!variationActive()) {
+      vState.textContent = curVariation() ? 'off in preview' : 'exact';
+      return;
+    }
+    const st = variationFor(v, playCycle, previewSeed);
+    vState.textContent = `loop ${playCycle} · ${Math.round(st.speed * 100)}% speed`;
   }
 
   // -------------------------------------------------------------------------
@@ -1898,20 +1969,27 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     const clip = activeClip();
     if (mode === 'animate' && playing && clip && clip.frames.length > 1) {
       if (!last) last = now;
+      // this cycle's tempo draw (1 when variation is off/unconfigured)
+      const speed = variationActive() ? variationFor(curVariation(), playCycle, previewSeed).speed : 1;
       if (curDoc()) {
         // assembled: a continuous clock over the clip duration
         const total = Math.max(60, clipDurationMs());
-        playMs = (playMs + (now - last)) % total;
+        playMs += (now - last) * speed;
+        while (playMs >= total) {
+          playMs -= total;
+          playCycle++; // a new loop → a fresh variation draw
+        }
         playT = playMs / total;
         frameIdx = Math.min(clip.frames.length - 1, Math.round(playT * (clip.frames.length - 1)));
         render();
       } else {
-        acc += now - last;
+        acc += (now - last) * speed;
         const delays = effDelays(clip);
         let guard = 0;
         while (acc >= Math.max(30, delays[frameIdx] ?? 120) && guard++ < 8) {
           acc -= Math.max(30, delays[frameIdx] ?? 120);
           frameIdx = (frameIdx + 1) % clip.frames.length;
+          if (frameIdx === 0) playCycle++;
         }
         render();
       }
@@ -2497,6 +2575,35 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
   }
   cDur.onchange = () => applyDurationMs(Number(cDur.value) || 0);
   tDur.onchange = () => applyDurationMs(Number(tDur.value) || 0);
+
+  /** Write a variation patch onto the active clip (undoable). Zeroing every
+   *  amount drops the config entirely, so "off" leaves no trace in the file. */
+  function patchVariation(patch: Partial<ClipVariation>): boolean {
+    const clip = activeClip();
+    const bodyId = current?.body.bodyId;
+    if (!clip || !bodyId || !poseable()) return false;
+    withClipsHistory('variation', bodyId, () => {
+      const tl = timelineFor(store, bodyId, clip.clipKey, true)!;
+      const next: ClipVariation = { ...tl.variation, ...patch };
+      for (const k of ['amp', 'speed', 'phase'] as const) if (!next[k]) delete next[k];
+      if (next.bones && !Object.keys(next.bones).length) delete next.bones;
+      tl.variation = next.amp || next.speed || next.phase ? next : undefined;
+      if (!tl.variation) delete tl.variation;
+    });
+    render();
+    return true;
+  }
+  const varPct = (el: HTMLInputElement): number => Math.max(0, Math.min(100, Number(el.value) || 0)) / 100;
+  vAmp.onchange = () => patchVariation({ amp: varPct(vAmp) });
+  vSpeed.onchange = () => patchVariation({ speed: varPct(vSpeed) });
+  vPhase.onchange = () => patchVariation({ phase: varPct(vPhase) });
+  vPreview.onchange = () => render();
+  $<HTMLButtonElement>('vShuffle').onclick = () => {
+    previewSeed = (previewSeed + 1) % 997;
+    playCycle++;
+    render();
+    toast(variationActive() ? 'new variation draw' : 'set an amount above to see variation');
+  };
   cFrames.onchange = () => {
     const doc = curDoc();
     const clip = activeClip();
@@ -2640,6 +2747,8 @@ export async function mountStudio(host: StudioAdapter, opts: StudioOptions = {})
     moveKey: moveKeyOp,
     copyKey: copyKeyOp,
     pasteKey: pasteKeyOp,
+    getVariation: curVariation,
+    setVariation: patchVariation,
     addClip: (name) => {
       const doc = curDoc();
       if (!doc) return null;

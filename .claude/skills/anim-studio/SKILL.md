@@ -134,6 +134,17 @@ violate. Treat them as non-negotiable unless the user explicitly overrides.
    doubt, route hand-edits back through the emitter or a studio Save to
    canonicalize. **Commit to seal an animation.**
 
+7. **Variation is sampling-time and deterministic, never baked.** The optional
+   per-clip `variation` (amplitude / speed / phase) is applied when a pose is
+   sampled, from a hash of `(seed, cycle, bone)` — never `Math.random()`, and
+   never written into the keys. So: an unconfigured clip is untouched
+   (invariant 1 still holds), zeroing the amounts restores the authored motion
+   byte-for-byte, and the studio, a bake, and the game all reproduce the same
+   draw. Amounts are drawn **per loop cycle** and held constant through it, so
+   one playthrough stays smooth. Relative channels scale directly; absolute
+   channels scale about the clip's first key (never toward the origin). Preview
+   it only while playing — authoring must always show the exact authored pose.
+
 ## Pick your task
 
 - **Wiring anim-studio into a game** (implementing the rig, the adapter, the
@@ -172,6 +183,10 @@ re-exported** from the index — import it directly in `vite.config.ts`.
   `beginBoneRecord` / `endBoneRecord`, `resetBoneIds`, `nextBone` (`rig.ts`).
 - Timeline ops (mutate the store in place): `timelineFor`, `keyAt`, `clearKeyAt`,
   `prunedClips`, `countKeys`, `KEY_EPS` (`timeline.ts`).
+- Optional per-cycle variation: `samplePoseVaried(tl, t, cycle, extraSeed)`,
+  `variationFor`, `applyVariation`, `warpTime`, the `ClipVariation` type
+  (`variation.ts`). Deterministic (hashed seed, never `Math.random()`),
+  applied at sampling time, and **inert until configured** — see rule 7.
 - Emit (deterministic): `emitClipsModule`, `emitClipsJson`, `clipsLiteral`,
   `stableClips` (`emit.ts`).
 - Assembled characters: the `SkeletonDoc` / `SkelBone` / `SkelClip` types and

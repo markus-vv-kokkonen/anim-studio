@@ -202,6 +202,25 @@ try {
   });
   if (!out.keyCrud.moved || !out.keyCrud.copyAtNew || out.keyCrud.copyAtOld || !out.keyCrud.pasted) fail(`key CRUD wrong: ${JSON.stringify(out.keyCrud)}`);
 
+  // --- variation: off by default, deterministic when on, and clears away ----
+  out.variation = await page.evaluate(async () => {
+    const api = window.__ae;
+    const before = api.getVariation() ?? null;
+    api.setVariation({ amp: 0.25, speed: 0.1 });
+    const cfg = api.getVariation();
+    const { samplePoseVaried } = await import('/src/variation.ts');
+    const tl = { variation: cfg, keys: [{ t: 0, pose: { arm: { dAng: 0 } } }, { t: 1, pose: { arm: { dAng: 1 } } }] };
+    const draws = [0, 1, 2, 3].map((c) => samplePoseVaried(tl, 1, c, 0).arm.dAng);
+    const repeat = samplePoseVaried(tl, 1, 2, 0).arm.dAng;
+    api.setVariation({ amp: 0, speed: 0, phase: 0 });
+    return { before, cfg, draws, repeat, cleared: api.getVariation() ?? null };
+  });
+  if (out.variation.before !== null) fail('variation should be absent until configured');
+  if (out.variation.cleared !== null) fail('zeroing variation should remove the config');
+  if (new Set(out.variation.draws).size < 3) fail(`variation draws not varying: ${out.variation.draws}`);
+  if (out.variation.draws.some((d) => d < 0.75 || d > 1.25)) fail(`variation outside ±amp: ${out.variation.draws}`);
+  if (out.variation.repeat !== out.variation.draws[2]) fail('variation is not deterministic per (seed, cycle)');
+
   // --- persistence: skeleton file written; the game clips file stays clean ---
   out.skelSaved = await page.evaluate(() => window.__ae.saveSkeletons());
   if (!out.skelSaved) fail('saveSkeletons failed');
