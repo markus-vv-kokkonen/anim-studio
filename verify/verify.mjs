@@ -7,7 +7,7 @@
  * its clips and keys, persist demo/skeletons.json, and prove it survives a
  * reload. Both files are restored afterwards. Non-destructive.
  *
- *   npm run verify              # spawns its own vite dev server
+ *   bun run verify              # spawns its own vite dev server
  *
  * Set CHROMIUM_PATH to a chrome binary to skip Playwright's managed download.
  */

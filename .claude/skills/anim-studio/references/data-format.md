@@ -143,7 +143,7 @@ the motion *arriving at* it, not leaving it.
 Four routes, from most to least assisted. Prefer the assisted ones — they keep
 the invariants for you.
 
-**A. The studio UI** (`npm run dev`, or the game's dev page). Pick a body, choose
+**A. The studio UI** (`bun run dev`, or the game's dev page). Pick a body, choose
 a clip, turn on **✎ pose edit**, drag a joint (cyan = arm/FK, green = foot/IK, amber =
 body root), then **set key** / **clear key**, choose **ease in**, set **duration**
 (ms) for retimable clips, **reset clip** to clear a clip's authoring, and **Save**

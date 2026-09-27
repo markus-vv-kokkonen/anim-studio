@@ -168,7 +168,7 @@ verify/         headless Playwright end-to-end (`bun run verify`)
 Developing: `bun run dev` (the demo is the workbench), `bun run check`
 (strict tsc), `bun run test`, `bun run verify` (the full authoring loop in
 headless Chromium — it restores `demo/clips.ts` afterwards), `bun run build`
-(bundle smoke check). CI runs all of them. The test runner imports `.ts`
+(bundle smoke check). There is no CI — run all of them before cutting a tag. The test runner imports `.ts`
 directly via Node's type stripping — hence `engines.node >= 22.18`; the
 package itself is plain browser TS with no Node requirement.
 
@@ -268,7 +268,8 @@ panel per body) covers loadout-style options — a hero's weapon/facing/tier.
 
 ```ts
 // vite.config.ts
-import { animStudioSavePlugin } from 'anim-studio/src/save-plugin';
+// relative into node_modules, NOT the bare specifier — see "Package layout" above
+import { animStudioSavePlugin } from './node_modules/anim-studio/src/save-plugin.ts';
 
 plugins: [
   animStudioSavePlugin({
@@ -357,7 +358,7 @@ clips() state() setPose(on) bones() nudge(boneId, dAng) authoredKeys()
 save()`), modes + history (`mode() setMode(m) undo() redo()`), keyframe CRUD
 (`moveKey(from, to) copyKey() pasteKey()`), clip CRUD on assembled bodies
 (`addClip(name) renameClip(key, name) deleteClip(key) patchClip(key, {frames,
-per})`), and Assemble mode itself (`skeletons() newSkeleton(name)
+fps})`), and Assemble mode itself (`skeletons() newSkeleton(name)
 deleteSkeleton(id) addSkelBone(docId, opts) patchSkelBone(docId, boneId,
 patch) saveSkeletons()`). `verify/verify.mjs` shows the pattern: boot in
 Playwright, nudge a bone, Save, reload, and assert the baked frame actually
