@@ -3,3 +3,7 @@ dist
 package-lock.json
 verify/verify-shot.png
 verify/verify-shot-assemble.png
+
+# Working-directory config: absolute, machine-specific paths.
+# Copy anim-studio.config.example.json and edit.
+anim-studio.config.json

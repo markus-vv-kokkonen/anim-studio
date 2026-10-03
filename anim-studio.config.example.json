@@ -1,0 +1,13 @@
+{
+  "active": "heft",
+  "projects": [
+    {
+      "id": "heft",
+      "name": "HEFT",
+      "root": "/absolute/path/to/co-op-adventure-puzzle",
+      "publicDir": "public",
+      "skeletonsFile": "src/data/anim/skeletons.json",
+      "clipsFile": "src/data/anim/clips.ts"
+    }
+  ]
+}
