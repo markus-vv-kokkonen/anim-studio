@@ -189,7 +189,10 @@ clips file in the deterministic stored format.
 ```ts
 // vite.config.ts — import the plugin DIRECTLY (it is not re-exported from index;
 // it imports node:fs and must never enter the browser/production bundle).
-import { animStudioSavePlugin } from 'anim-studio/src/save-plugin';
+// relative into node_modules, NOT the bare specifier: Vite hands its config's bare
+// imports to Node, which can't resolve the package's extensionless imports or
+// type-strip .ts under node_modules (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING)
+import { animStudioSavePlugin } from './node_modules/anim-studio/src/save-plugin.ts';
 
 export default defineConfig({
   plugins: [

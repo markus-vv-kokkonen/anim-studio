@@ -39,7 +39,7 @@ moveKey(fromFrame, toFrame): boolean    copyKey(): boolean    pasteKey(): boolea
 
 // clip CRUD (assembled bodies only; `key` is the stable clip key)
 addClip(name): string|null              renameClip(key, name): boolean
-deleteClip(key): boolean                patchClip(key, {frames?, per?}): boolean
+deleteClip(key): boolean                patchClip(key, {frames?, fps?}): boolean
 
 // assembled characters (Assemble mode, drivable from either mode)
 skeletons(): {id,name,bones,clips}[]    newSkeleton(name): string
@@ -163,18 +163,18 @@ seam is where silent divergence hides.
 
 In this repo (a host game wires equivalents into its own scripts):
 
-- `npm run dev` — the demo studio at `/demo/`, the authoring workbench.
-- `npm test` — `node:test` over the pure modules (`sample`, `emit`, `timeline`,
+- `bun run dev` — the demo studio at `/demo/`, the authoring workbench.
+- `bun run test` — `node:test` over the pure modules (`sample`, `emit`, `timeline`,
   `skeleton`, `variation`).
-- `npm run verify` — the full headless loop in Chromium (§1): the authoring
+- `bun run verify` — the full headless loop in Chromium (§1): the authoring
   loop, then Assemble mode (build a character, clip + key CRUD, persistence,
   reload survival); non-destructive, restores `demo/clips.ts` and
   `demo/skeletons.json` afterward. Set `CHROMIUM_PATH` to a Chrome binary to
   skip Playwright's managed download.
-- `npm run check` — strict `tsc --noEmit`.
-- `npm run build` — bundle smoke check (there is no shipped dist; the package is
+- `bun run check` — strict `tsc --noEmit`.
+- `bun run build` — bundle smoke check (there is no shipped dist; the package is
   consumed as source).
 
-CI runs all of them. Requires Node ≥ 22.18. When wiring anim-studio into a game,
-port the `npm run verify` pattern to that game's studio page so you have an
+There is no CI — run all of them before cutting a tag. Requires Node ≥ 22.18. When wiring anim-studio into a game,
+port the `bun run verify` pattern to that game's studio page so you have an
 end-to-end proof the data channel works before trusting authored data in a build.

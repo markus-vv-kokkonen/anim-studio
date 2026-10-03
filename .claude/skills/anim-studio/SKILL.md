@@ -200,7 +200,9 @@ re-exported** from the index — import it directly in `vite.config.ts`.
   `adapter.ts`). The adapter's optional `skeletons: { endpoint? }` opts into
   server-side persistence for assembled characters.
 - Save plugin (import directly): `animStudioSavePlugin(opts)` from
-  `anim-studio/src/save-plugin` — plus optional `skeletonsFile` /
+  `./node_modules/anim-studio/src/save-plugin.ts` (a path relative into
+  `node_modules`, not the bare specifier — Node loads `vite.config.ts` and
+  cannot resolve/type-strip it; see `references/wiring.md` §4) — plus optional `skeletonsFile` /
   `skeletonsEndpoint` for the assembled-characters file.
 
 **Headless hook.** `mountStudio` exposes a driving API on `window.__ae` (rename
@@ -213,11 +215,11 @@ patchClip`), and Assemble mode (`skeletons() newSkeleton deleteSkeleton
 addSkelBone patchSkelBone saveSkeletons`). Use it to author or verify without
 a human — see `references/verification.md`.
 
-**Dev commands** (this repo; a host wires equivalents): `npm run dev` (the demo
-is the workbench at `/demo/`), `npm run check` (strict `tsc`), `npm test`
-(`node:test` over the pure modules), `npm run verify` (headless end-to-end:
+**Dev commands** (this repo; a host wires equivalents): `bun run dev` (the demo
+is the workbench at `/demo/`), `bun run check` (strict `tsc`), `bun run test`
+(`node:test` over the pure modules), `bun run verify` (headless end-to-end:
 pose → key → save → reload → assert the baked frame changed, then restores the
-file), `npm run build` (bundle smoke check). Requires Node ≥ 22.18 (the test
+file), `bun run build` (bundle smoke check). Requires Node ≥ 22.18 (the test
 runner strips types from `.ts` directly).
 
 **`demo/` is the reference integration** — `demo/bodies.ts` implements the exact
